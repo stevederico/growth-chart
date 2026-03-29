@@ -7,8 +7,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY backend/package*.json ./backend/
 
-# Install dependencies
-RUN npm install && cd backend && npm install
+# Install dependencies (workspaces hoist to root node_modules)
+RUN npm install
 
 # Copy source code
 COPY . .
@@ -29,7 +29,9 @@ COPY --from=builder /app/dist ./dist
 
 # Copy backend
 COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/backend/node_modules ./backend/node_modules
+
+# Copy root node_modules (workspace deps hoisted here)
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copy package files
 COPY package*.json ./

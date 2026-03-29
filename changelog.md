@@ -1,5 +1,10 @@
 ## CHANGELOG
 
+0.4.0
+
+  Fix Dockerfile workspace deps
+  Deploy to Railway
+
 0.3.0
 
   Restore boilerplate dashboard
