@@ -14,7 +14,7 @@ import { databaseManager } from "./adapters/manager.js";
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile, mkdir, stat, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFile, mkdir, mkdirSync, stat, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 // ==== SERVER CONFIG ====
@@ -929,6 +929,7 @@ app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 const GITHUB_REPO = 'stevederico/dottie-desktop-releases';
 const SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+try { mkdirSync('./databases', { recursive: true }); } catch {}
 const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './databases/GrowthChart.db');
 downloadsDb.exec('PRAGMA journal_mode = WAL');
 downloadsDb.exec('PRAGMA synchronous = NORMAL');

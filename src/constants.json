@@ -14,6 +14,26 @@
     "noLogin": true,
     "authOverlay": false,
     "sidebarCollapsed": false,
+    "features": {
+        "title": "Features",
+        "items": [
+            {
+                "icon": "chart-line",
+                "title": "Daily Tracking",
+                "description": "Automatic nightly snapshots of download counts"
+            },
+            {
+                "icon": "git-branch",
+                "title": "Per-Release Breakdown",
+                "description": "See which versions are getting the most traction"
+            },
+            {
+                "icon": "trending-up",
+                "title": "Growth Trends",
+                "description": "Visualize download trends over time"
+            }
+        ]
+    },
     "backendURL": "/api",
     "devBackendURL": "http://localhost:8000/api",
     "pages": [
@@ -23,6 +43,11 @@
             "icon": "layout-dashboard"
         }
     ],
+    "stripeProducts": [],
+    "pricing": {
+        "title": "Pricing",
+        "extras": []
+    },
     "navLinks": [],
     "footerLinks": [],
     "copyrightText": "All rights reserved.",

@@ -1,6 +1,13 @@
 ## CHANGELOG
 
-2.32.0
+0.3.0
+
+  Restore boilerplate dashboard
+  Fix constants validation
+  Fix field name mismatch
+  Add databases directory
+
+0.2.0
 
   Add download stats dashboard
   Add stats cards component
@@ -8,7 +15,6 @@
   Add releases breakdown table
   Simplify to single route
   Update constants for analytics
-  Deprecate unused boilerplate components
 
 2.31.0
 
