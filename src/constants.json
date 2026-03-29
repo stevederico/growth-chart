@@ -1,0 +1,32 @@
+{
+    "version": "0.1.0",
+    "design": {
+        "baseColor": "neutral",
+        "radius": "medium",
+        "font": "geist",
+        "iconLibrary": "lucide"
+    },
+    "appName": "Growth Chart",
+    "appIcon": "chart-line",
+    "tagline": "Download Analytics for Dottie Desktop",
+    "cta": "Get Started",
+    "ctaHeading": "Ready to Get Started?",
+    "noLogin": true,
+    "authOverlay": false,
+    "sidebarCollapsed": false,
+    "backendURL": "/api",
+    "devBackendURL": "http://localhost:8000/api",
+    "pages": [
+        {
+            "title": "Dashboard",
+            "url": "home",
+            "icon": "layout-dashboard"
+        }
+    ],
+    "navLinks": [],
+    "footerLinks": [],
+    "copyrightText": "All rights reserved.",
+    "companyName": "Steve Derico",
+    "companyWebsite": "stevederico.com",
+    "companyEmail": "steve@stevederico.com"
+}
