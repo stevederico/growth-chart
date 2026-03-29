@@ -1,0 +1,8 @@
+{
+  "staticDir": "../dist",
+  "database": {
+    "db": "GrowthChart",
+    "dbType": "sqlite",
+    "connectionString": "./databases/GrowthChart.db"
+  }
+}
