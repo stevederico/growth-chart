@@ -3,6 +3,6 @@
   "database": {
     "db": "GrowthChart",
     "dbType": "sqlite",
-    "connectionString": "./databases/GrowthChart.db"
+    "connectionString": "./backend/databases/GrowthChart.db"
   }
 }

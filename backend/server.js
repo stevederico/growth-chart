@@ -928,8 +928,8 @@ app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 // ==== GITHUB DOWNLOAD TRACKING ====
 const GITHUB_REPO = process.env.GITHUB_REPO || '';
 
-try { mkdirSync('./databases', { recursive: true }); } catch {}
-const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './databases/GrowthChart.db');
+try { mkdirSync('./backend/databases', { recursive: true }); } catch {}
+const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './backend/databases/GrowthChart.db');
 downloadsDb.exec('PRAGMA journal_mode = WAL');
 downloadsDb.exec('PRAGMA synchronous = NORMAL');
 

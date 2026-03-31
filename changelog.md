@@ -1,5 +1,10 @@
 ## CHANGELOG
 
+0.6.0
+
+  Fix volume DB path
+  Add railway.json cron
+
 0.5.0
 
   Use Railway cron scheduling
