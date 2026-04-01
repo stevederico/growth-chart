@@ -5,9 +5,6 @@
   Fix date timezone display
   Add hourly snapshot check
   Add backfill endpoint
-  Add WoW growth goal card
-  Remove releases section
-  Remove snapshot button
 
 0.6.0
 
