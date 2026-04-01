@@ -1663,8 +1663,26 @@ function loadEnvFile(filePath) {
 }
 
 // ==== DOWNLOAD SNAPSHOT ====
-// Run once on startup — Railway cron schedule handles daily wake-ups
+// Run once on startup
 fetchDownloadSnapshot().catch(() => {});
+
+// Hourly check: if today's snapshot is missing, take one.
+// Handles the case where the server stays running across midnight
+// and Railway cron doesn't trigger a restart.
+setInterval(async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const row = downloadsDb.prepare(
+      'SELECT COUNT(*) as count FROM downloads WHERE date = ?'
+    ).get(today);
+    if (row.count === 0) {
+      logger.info('No snapshot for today, triggering fetch', { date: today });
+      await fetchDownloadSnapshot();
+    }
+  } catch (err) {
+    logger.error('Hourly snapshot check failed', { error: err.message });
+  }
+}, 60 * 60 * 1000);
 
 // ==== SERVER STARTUP ====
 const server = serve({
