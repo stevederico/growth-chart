@@ -86,20 +86,21 @@ export default function HomeView() {
   /** Derive stats from the latest snapshot and daily deltas */
   const stats = useMemo(() => {
     if (!latestSnapshot) {
-      return { wowGrowth: null, downloadsToday: 0 };
+      return { wowGrowth: null, downloadsToday: 0, goalNeeded: null, goalDeadline: null };
     }
 
     const today = new Date().toISOString().split('T')[0];
     const todayEntry = (dailyData || []).find((d) => d.date === today);
     const downloadsToday = todayEntry?.total || 0;
 
-    // Week-over-week growth from chart data (cumulative totals)
     let wowGrowth = null;
+    let goalNeeded = null;
+    let goalDeadline = null;
+
     if (chartData.length >= 2) {
       const now = new Date();
       const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const sevenStr = sevenDaysAgo.toISOString().split('T')[0];
 
       const currentTotal = chartData[chartData.length - 1].total;
       const prevEntry = chartData.reduce((closest, entry) =>
@@ -110,10 +111,17 @@ export default function HomeView() {
 
       if (prevEntry.total > 0) {
         wowGrowth = ((currentTotal - prevEntry.total) / prevEntry.total) * 100;
+
+        // 20% WoW goal: target = reference total * 1.20
+        const target = Math.ceil(prevEntry.total * 1.20);
+        goalNeeded = Math.max(0, target - currentTotal);
+        const deadline = new Date(prevEntry.date + 'T00:00:00');
+        deadline.setDate(deadline.getDate() + 7);
+        goalDeadline = deadline.toISOString().split('T')[0];
       }
     }
 
-    return { wowGrowth, downloadsToday };
+    return { wowGrowth, downloadsToday, goalNeeded, goalDeadline };
   }, [latestSnapshot, dailyData, chartData]);
 
   if (isLoading) {
@@ -170,6 +178,8 @@ export default function HomeView() {
             <SectionCards
               wowGrowth={stats.wowGrowth}
               downloadsToday={stats.downloadsToday}
+              goalNeeded={stats.goalNeeded}
+              goalDeadline={stats.goalDeadline}
             />
             <div className="px-4 lg:px-6">
               <DailyTable data={dailyData || []} />
