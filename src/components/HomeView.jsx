@@ -13,7 +13,7 @@ import {
 } from '@stevederico/skateboard-ui/shadcn/ui/empty';
 import { SectionCards } from './SectionCards.jsx';
 import { ChartAreaInteractive } from './ChartAreaInteractive.jsx';
-import { DailyTable, DataTable } from './DataTable.jsx';
+import { DailyTable } from './DataTable.jsx';
 
 /**
  * Dashboard view for Growth Chart download analytics.
@@ -183,9 +183,6 @@ export default function HomeView() {
             />
             <div className="px-4 lg:px-6">
               <DailyTable data={dailyData || []} />
-            </div>
-            <div className="px-4 lg:px-6">
-              <DataTable data={latestSnapshot?.releases || []} />
             </div>
           </div>
         </div>
