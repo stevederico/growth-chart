@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp } from "lucide-react"
+import { TrendingDown, TrendingUp, Minus } from "lucide-react"
 
 import { Badge } from "@stevederico/skateboard-ui/shadcn/ui/badge"
 import {
@@ -21,43 +21,42 @@ function fmt(num) {
 }
 
 /**
- * Four metric cards showing download stats.
- *
- * Matches the skateboard boilerplate SectionCards layout exactly —
- * gradient cards with badge, footer trend line, and description.
+ * Two metric cards: week-over-week growth rate and downloads today.
  *
  * @component
  * @param {Object} props
- * @param {number} props.totalDownloads - All-time cumulative downloads
+ * @param {number|null} props.wowGrowth - Week-over-week growth percentage (null if insufficient data)
  * @param {number} props.downloadsToday - Downloads in the latest daily delta
- * @param {number} props.activeReleases - Releases with at least 1 download
- * @param {string} props.latestVersion - Most recent release tag
  * @returns {JSX.Element}
  */
-export function SectionCards({ totalDownloads = 0, downloadsToday = 0 }) {
-  const isUp = downloadsToday > 0
+export function SectionCards({ wowGrowth = null, downloadsToday = 0 }) {
+  const hasGrowth = wowGrowth !== null
+  const isGrowthUp = hasGrowth && wowGrowth > 0
+  const isGrowthDown = hasGrowth && wowGrowth < 0
+  const isTodayUp = downloadsToday > 0
 
   return (
     <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2">
       <Card className="@container/card">
         <CardHeader>
-          <CardDescription>Total Downloads</CardDescription>
+          <CardDescription>Week over Week</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {fmt(totalDownloads)}
+            {hasGrowth ? `${wowGrowth >= 0 ? '+' : ''}${wowGrowth.toFixed(1)}%` : '--'}
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
-              <TrendingUp />
-              All time
+              {isGrowthUp ? <TrendingUp /> : isGrowthDown ? <TrendingDown /> : <Minus />}
+              7-day
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            Across all releases <TrendingUp className="size-4" />
+            {isGrowthUp ? 'Growing' : isGrowthDown ? 'Declining' : 'Not enough data'}
+            {isGrowthUp ? <TrendingUp className="size-4" /> : isGrowthDown ? <TrendingDown className="size-4" /> : <Minus className="size-4" />}
           </div>
           <div className="text-muted-foreground">
-            Cumulative download count
+            Compared to previous 7 days
           </div>
         </CardFooter>
       </Card>
@@ -69,15 +68,15 @@ export function SectionCards({ totalDownloads = 0, downloadsToday = 0 }) {
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
-              {isUp ? <TrendingUp /> : <TrendingDown />}
-              {isUp ? `+${fmt(downloadsToday)}` : '0'}
+              {isTodayUp ? <TrendingUp /> : <TrendingDown />}
+              {isTodayUp ? `+${fmt(downloadsToday)}` : '0'}
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            {isUp ? 'New downloads today' : 'No new downloads yet'}
-            {isUp ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
+            {isTodayUp ? 'New downloads today' : 'No new downloads yet'}
+            {isTodayUp ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
           </div>
           <div className="text-muted-foreground">
             Daily delta from snapshot
