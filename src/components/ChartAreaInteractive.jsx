@@ -1,7 +1,6 @@
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 
-import { useIsMobile } from "@stevederico/skateboard-ui/shadcn/hooks/use-mobile"
 import {
   Card,
   CardAction,
@@ -10,9 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@stevederico/skateboard-ui/shadcn/ui/card"
-import {
-  ChartContainer,
-} from "@stevederico/skateboard-ui/shadcn/ui/chart"
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -36,27 +32,22 @@ const MODES = {
   growth: { label: "Daily Downloads", description: "New downloads per day" },
 }
 
-const chartConfig = {
-  total: {
-    label: "Downloads",
-    color: "var(--primary)",
-  },
-}
-
 /**
- * Custom tooltip to avoid shadcn ChartTooltipContent config lookup issues.
+ * Custom tooltip for the area chart.
  *
- * @param {Object} props - Recharts tooltip props
+ * @param {Object} props - Recharts tooltip callback props
+ * @param {boolean} props.active
+ * @param {Array} props.payload
  * @returns {JSX.Element|null}
  */
-function CustomTooltip({ active, payload, label: mode }) {
+function CustomTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
   const { date, total } = payload[0].payload
   return (
     <div className="border-border/50 bg-background rounded-lg border px-3 py-2 text-xs shadow-xl">
       <div className="font-medium">{fmtDate(date)}</div>
       <div className="text-muted-foreground mt-1 tabular-nums">
-        {mode === "growth" ? "+" : ""}{total.toLocaleString()} downloads
+        {total.toLocaleString()} downloads
       </div>
     </div>
   )
@@ -72,9 +63,7 @@ function CustomTooltip({ active, payload, label: mode }) {
  * @returns {JSX.Element}
  */
 export function ChartAreaInteractive({ data = [], dailyData = [] }) {
-  const isMobile = useIsMobile()
   const [mode, setMode] = React.useState("total")
-
   const activeData = mode === "growth" ? dailyData : data
 
   return (
@@ -82,12 +71,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
       <CardHeader>
         <CardTitle>{MODES[mode].label}</CardTitle>
         <CardDescription>
-          <span className="hidden @[540px]/card:block">
-            {MODES[mode].description}
-          </span>
-          <span className="@[540px]/card:hidden">
-            {mode === "growth" ? "Daily downloads" : "Download history"}
-          </span>
+          {MODES[mode].description}
         </CardDescription>
         <CardAction>
           <ToggleGroup
@@ -108,53 +92,43 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
             Not enough data yet
           </div>
         ) : (
-          <ChartContainer
-            config={chartConfig}
-            className="aspect-auto h-[250px] w-full"
-          >
-            <AreaChart data={activeData}>
-              <defs>
-                <linearGradient id="fillTotal" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="5%"
-                    stopColor="var(--color-total)"
-                    stopOpacity={1.0}
-                  />
-                  <stop
-                    offset="95%"
-                    stopColor="var(--color-total)"
-                    stopOpacity={0.1}
-                  />
-                </linearGradient>
-              </defs>
-              <CartesianGrid vertical={false} />
-              <XAxis
-                dataKey="date"
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                minTickGap={32}
-                tickFormatter={fmtDate}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                width={40}
-              />
-              <Tooltip
-                cursor={false}
-                content={<CustomTooltip label={mode} />}
-              />
-              <Area
-                name="total"
-                dataKey="total"
-                type="natural"
-                fill="url(#fillTotal)"
-                stroke="var(--color-total)"
-              />
-            </AreaChart>
-          </ChartContainer>
+          <div className="h-[250px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={activeData}>
+                <defs>
+                  <linearGradient id="fillChart" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/50" />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={32}
+                  tickFormatter={fmtDate}
+                  className="fill-muted-foreground text-xs"
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  width={40}
+                  className="fill-muted-foreground text-xs"
+                />
+                <Tooltip content={CustomTooltip} cursor={false} />
+                <Area
+                  dataKey="total"
+                  type="natural"
+                  fill="url(#fillChart)"
+                  stroke="hsl(var(--primary))"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
         )}
       </CardContent>
     </Card>
