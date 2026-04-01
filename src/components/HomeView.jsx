@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { RefreshCw, CircleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
 import { Button } from '@stevederico/skateboard-ui/shadcn/ui/button';
@@ -31,8 +31,6 @@ export default function HomeView() {
   const [dailyData, setDailyData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
   const fetchData = useCallback(async () => {
     try {
       setError(null);
@@ -54,20 +52,6 @@ export default function HomeView() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
-
-  /** Trigger a manual snapshot then refresh all data */
-  const handleSnapshot = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      await apiRequest('/downloads/snapshot', { method: 'POST' });
-      await fetchData();
-    } catch (err) {
-      console.error('Snapshot failed:', err);
-      setError('Snapshot failed. Please try again.');
-    } finally {
-      setIsRefreshing(false);
-    }
   }, [fetchData]);
 
   /** Build chart data from snapshots — one point per date with total downloads */
@@ -157,18 +141,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title="Dashboard">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleSnapshot}
-          disabled={isRefreshing}
-          aria-label="Take snapshot"
-        >
-          <RefreshCw size={16} className={isRefreshing ? 'animate-spin motion-reduce:animate-none' : ''} />
-          Snapshot
-        </Button>
-      </Header>
+      <Header title="Dashboard" />
       <div className="flex flex-1 flex-col">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
