@@ -1129,6 +1129,58 @@ app.post('/api/downloads/snapshot', async (c) => {
 });
 
 /**
+ * POST /api/downloads/backfill — Insert a historical total for a given date.
+ * Distributes the total proportionally across releases based on the nearest existing snapshot.
+ *
+ * @body {string} date - YYYY-MM-DD date to backfill
+ * @body {number} total - Total download count for that date
+ */
+app.post('/api/downloads/backfill', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { date, total } = body;
+    if (!date || total == null) {
+      return c.json({ error: 'date and total are required' }, 400);
+    }
+
+    const nearest = downloadsDb.prepare(
+      'SELECT DISTINCT date FROM downloads ORDER BY ABS(julianday(date) - julianday(?)) LIMIT 1'
+    ).get(date);
+
+    if (!nearest) {
+      return c.json({ error: 'No existing snapshots to base distribution on' }, 400);
+    }
+
+    const refRows = downloadsDb.prepare(
+      'SELECT tag, download_count FROM downloads WHERE date = ?'
+    ).all(nearest.date);
+
+    const refTotal = refRows.reduce((s, r) => s + r.download_count, 0);
+    const insertStmt = downloadsDb.prepare(
+      'INSERT OR REPLACE INTO downloads (date, tag, download_count) VALUES (?, ?, ?)'
+    );
+
+    const results = [];
+    let assigned = 0;
+    for (let i = 0; i < refRows.length; i++) {
+      const tag = refRows[i].tag;
+      const count = i === refRows.length - 1
+        ? total - assigned
+        : Math.round((refRows[i].download_count / refTotal) * total);
+      assigned += count;
+      insertStmt.run(date, tag, Math.max(0, count));
+      results.push({ tag, download_count: Math.max(0, count) });
+    }
+
+    logger.info('Backfill saved', { date, total, releaseCount: results.length });
+    return c.json({ date, total, releases: results }, 201);
+  } catch (err) {
+    logger.error('Backfill failed', { error: err.message });
+    return c.json({ error: 'Backfill failed: ' + err.message }, 500);
+  }
+});
+
+/**
  * Parse JSON request body with proper error handling
  *
  * Returns parsed JSON or null if parsing fails. Sets 400 response on failure.
