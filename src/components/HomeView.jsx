@@ -83,20 +83,20 @@ export default function HomeView() {
       .map(([date, total]) => ({ date, total }));
   }, [snapshots]);
 
-  /** Derive stats from the latest snapshot */
+  /** Derive stats from the latest snapshot and daily deltas */
   const stats = useMemo(() => {
     if (!latestSnapshot) {
-      return { totalDownloads: 0, downloadsToday: 0, activeReleases: 0, latestVersion: '--' };
+      return { totalDownloads: 0, downloadsToday: 0 };
     }
 
     const releases = latestSnapshot.releases || [];
     const totalDownloads = latestSnapshot.total ?? releases.reduce((sum, r) => sum + (r.download_count || 0), 0);
-    const activeReleases = releases.filter((r) => (r.download_count || 0) > 0).length;
-    const sorted = [...releases].sort((a, b) => b.tag?.localeCompare(a.tag, undefined, { numeric: true }));
-    const latestVersion = sorted[0]?.tag || '--';
+    const today = new Date().toISOString().split('T')[0];
+    const todayEntry = (dailyData || []).find((d) => d.date === today);
+    const downloadsToday = todayEntry?.total || 0;
 
-    return { totalDownloads, downloadsToday: 0, activeReleases, latestVersion };
-  }, [latestSnapshot]);
+    return { totalDownloads, downloadsToday };
+  }, [latestSnapshot, dailyData]);
 
   if (isLoading) {
     return (
