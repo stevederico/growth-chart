@@ -27,6 +27,11 @@ import {
   ToggleGroupItem,
 } from "@stevederico/skateboard-ui/shadcn/ui/toggle-group"
 
+/** Parse YYYY-MM-DD as local date (avoids UTC midnight → previous-day shift) */
+function parseLocalDate(str) {
+  return new Date(str + 'T00:00:00')
+}
+
 const MODES = {
   total: { label: "Total Downloads", description: "Cumulative downloads over time" },
   growth: { label: "Growth Rate", description: "Daily new downloads" },
@@ -62,7 +67,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
 
   const filteredData = React.useMemo(() => {
     if (!activeData.length) return []
-    const referenceDate = new Date(activeData[activeData.length - 1].date)
+    const referenceDate = parseLocalDate(activeData[activeData.length - 1].date)
     let daysToSubtract = 90
     if (timeRange === "30d") {
       daysToSubtract = 30
@@ -71,7 +76,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
     }
     const startDate = new Date(referenceDate)
     startDate.setDate(startDate.getDate() - daysToSubtract)
-    return activeData.filter((item) => new Date(item.date) >= startDate)
+    return activeData.filter((item) => parseLocalDate(item.date) >= startDate)
   }, [timeRange, activeData])
 
   return (
@@ -158,11 +163,10 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
               tickMargin={8}
               minTickGap={32}
               tickFormatter={(value) => {
-                const date = new Date(value)
                 return new Intl.DateTimeFormat(undefined, {
                   month: "short",
                   day: "numeric",
-                }).format(date)
+                }).format(parseLocalDate(value))
               }}
             />
             <YAxis
@@ -179,7 +183,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
                     return new Intl.DateTimeFormat(undefined, {
                       month: "short",
                       day: "numeric",
-                    }).format(new Date(value))
+                    }).format(parseLocalDate(value))
                   }}
                   indicator="dot"
                 />

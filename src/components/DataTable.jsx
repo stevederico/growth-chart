@@ -35,7 +35,7 @@ function fmtDate(dateStr) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  }).format(new Date(dateStr))
+  }).format(new Date(dateStr + 'T00:00:00'))
 }
 
 /**
