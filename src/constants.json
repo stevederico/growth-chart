@@ -13,7 +13,7 @@
     "ctaHeading": "Ready to Get Started?",
     "noLogin": true,
     "authOverlay": false,
-    "sidebarCollapsed": false,
+    "sidebarCollapsed": true,
     "features": {
         "title": "Features",
         "items": [
