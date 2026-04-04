@@ -9,7 +9,6 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-  CommandShortcut,
 } from '@stevederico/skateboard-ui/shadcn/ui/command';
 import DynamicIcon from '@stevederico/skateboard-ui/DynamicIcon';
 
