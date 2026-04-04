@@ -14,6 +14,7 @@ import Layout from '@stevederico/skateboard-ui/Layout';
 import CommandMenu from './components/CommandMenu.jsx';
 import constants from './constants.json';
 const HomeView = lazy(() => import('./components/HomeView.jsx'));
+const SettingsView = lazy(() => import('./components/SettingsView.jsx'));
 
 /**
  * App layout with global command menu overlay.
@@ -40,6 +41,14 @@ const appRoutes = [
     element: (
       <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Spinner /></div>}>
         <HomeView />
+      </Suspense>
+    ),
+  },
+  {
+    path: 'settings',
+    element: (
+      <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Spinner /></div>}>
+        <SettingsView />
       </Suspense>
     ),
   },
