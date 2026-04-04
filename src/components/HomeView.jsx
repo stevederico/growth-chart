@@ -214,7 +214,7 @@ export default function HomeView() {
   const repoSelector = (
     <>
       <Select value={selectedRepo || ''} onValueChange={handleRepoChange}>
-        <SelectTrigger className="w-[200px]">
+        <SelectTrigger className="w-auto">
           <span className="flex items-center gap-2">
             <Github size={14} />
             {selectedRepo && selectedRepo !== 'all'
