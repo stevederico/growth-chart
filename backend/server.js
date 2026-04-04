@@ -963,6 +963,34 @@ downloadsDb.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)
 `);
 
+downloadsDb.exec(`
+  CREATE TABLE IF NOT EXISTS repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL UNIQUE,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+// Seed repos table from GITHUB_REPOS env var if empty
+const repoCount = downloadsDb.prepare('SELECT COUNT(*) as count FROM repos').get();
+if (repoCount.count === 0 && GITHUB_REPOS.length > 0) {
+  const insertRepo = downloadsDb.prepare('INSERT OR IGNORE INTO repos (repo) VALUES (?)');
+  for (const repo of GITHUB_REPOS) {
+    insertRepo.run(repo);
+  }
+  logger.info('Seeded repos table from GITHUB_REPOS env var', { count: GITHUB_REPOS.length });
+}
+
+/** Read all repo records from the database. */
+function getReposFromDb() {
+  return downloadsDb.prepare('SELECT id, repo, created_at FROM repos ORDER BY created_at ASC').all();
+}
+
+/** Read repo name strings from the database. */
+function getRepoListFromDb() {
+  return getReposFromDb().map(r => r.repo);
+}
+
 /**
  * Fetch GitHub release download counts for a single repo and store a daily snapshot.
  *
@@ -1034,18 +1062,19 @@ async function fetchDownloadSnapshot(repo) {
 /**
  * Fetch download snapshots for all configured repos.
  *
- * Iterates through GITHUB_REPOS and calls fetchDownloadSnapshot for each.
+ * Reads the repo list from the database and calls fetchDownloadSnapshot for each.
  * Errors for individual repos are logged but do not stop processing.
  *
  * @async
  * @returns {Promise<void>}
  */
 async function fetchAllSnapshots() {
-  if (GITHUB_REPOS.length === 0) {
-    logger.warn('GITHUB_REPOS not set, skipping snapshot');
+  const repos = getRepoListFromDb();
+  if (repos.length === 0) {
+    logger.warn('No repos configured, skipping snapshot');
     return;
   }
-  for (const repo of GITHUB_REPOS) {
+  for (const repo of repos) {
     try {
       await fetchDownloadSnapshot(repo);
     } catch (err) {
@@ -1058,7 +1087,75 @@ async function fetchAllSnapshots() {
  * GET /api/downloads/repos — Return the list of configured repos.
  */
 app.get('/api/downloads/repos', (c) => {
-  return c.json({ repos: GITHUB_REPOS });
+  return c.json({ repos: getRepoListFromDb() });
+});
+
+/**
+ * GET /api/repos — List all tracked repos with id, name, and created_at.
+ */
+app.get('/api/repos', (c) => {
+  const repos = getReposFromDb();
+  return c.json({ repos });
+});
+
+/**
+ * POST /api/repos — Add a repo to the tracking list.
+ * Validates the repo exists on GitHub before inserting.
+ * Triggers an initial download snapshot in the background.
+ *
+ * @body {string} repo - GitHub repo in "owner/name" format
+ */
+app.post('/api/repos', async (c) => {
+  const body = await c.req.json();
+  const repo = body?.repo?.trim();
+  if (!repo || !repo.includes('/')) {
+    return c.json({ error: 'Repo must be in "owner/name" format' }, 400);
+  }
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}`, {
+      headers: { 'User-Agent': 'GrowthChart-Bot/1.0', 'Accept': 'application/vnd.github+json' }
+    });
+    if (!res.ok) {
+      return c.json({ error: `GitHub repo "${repo}" not found` }, 400);
+    }
+  } catch {
+    return c.json({ error: 'Failed to validate repo on GitHub' }, 502);
+  }
+
+  try {
+    downloadsDb.prepare('INSERT INTO repos (repo) VALUES (?)').run(repo);
+  } catch (err) {
+    if (err.message?.includes('UNIQUE')) {
+      return c.json({ error: 'Repo already added' }, 409);
+    }
+    throw err;
+  }
+
+  const inserted = downloadsDb.prepare('SELECT id, repo, created_at FROM repos WHERE repo = ?').get(repo);
+
+  // Trigger initial snapshot for the new repo
+  fetchDownloadSnapshot(repo).catch(err => {
+    logger.error('Initial snapshot failed for new repo', { repo, error: err.message });
+  });
+
+  return c.json(inserted, 201);
+});
+
+/**
+ * DELETE /api/repos/:id — Remove a repo from the tracking list.
+ * Download history is preserved; only the repo record is deleted.
+ *
+ * @param {number} id - Repo record ID
+ */
+app.delete('/api/repos/:id', (c) => {
+  const id = parseInt(c.req.param('id'));
+  const existing = downloadsDb.prepare('SELECT repo FROM repos WHERE id = ?').get(id);
+  if (!existing) {
+    return c.json({ error: 'Repo not found' }, 404);
+  }
+  downloadsDb.prepare('DELETE FROM repos WHERE id = ?').run(id);
+  return c.json({ message: 'Repo removed', repo: existing.repo });
 });
 
 /**
@@ -1227,7 +1324,7 @@ app.post('/api/downloads/snapshot', async (c) => {
     }
 
     await fetchAllSnapshots();
-    return c.json({ message: 'Snapshots completed for all repos', repos: GITHUB_REPOS }, 201);
+    return c.json({ message: 'Snapshots completed for all repos', repos: getRepoListFromDb() }, 201);
   } catch (err) {
     return c.json({ error: 'Failed to fetch snapshot: ' + err.message }, 500);
   }
@@ -1245,7 +1342,7 @@ app.post('/api/downloads/backfill', async (c) => {
   try {
     const body = await c.req.json();
     const { date, total } = body;
-    const repo = body.repo || GITHUB_REPOS[0] || '';
+    const repo = body.repo || getRepoListFromDb()[0] || '';
     if (!date || total == null) {
       return c.json({ error: 'date and total are required' }, 400);
     }
@@ -1831,7 +1928,7 @@ fetchAllSnapshots().catch(() => {});
 setInterval(async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    for (const repo of GITHUB_REPOS) {
+    for (const repo of getRepoListFromDb()) {
       const row = downloadsDb.prepare(
         'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
       ).get(repo, today);
