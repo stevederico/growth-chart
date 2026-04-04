@@ -33,22 +33,33 @@ function fmtDate(dateStr) {
   }).format(new Date(dateStr + 'T00:00:00'))
 }
 
+/** Human-readable labels for each metric type. */
+const METRIC_LABELS = {
+  downloads: 'Downloads',
+  stars: 'Stars',
+  forks: 'Forks',
+  views: 'Page Views',
+  clones: 'Clones',
+}
+
 /**
- * Three metric cards: WoW growth, 20% goal tracker, and downloads today.
+ * Three metric cards: WoW growth, 20% goal tracker, and value today.
  *
  * @component
  * @param {Object} props
  * @param {number|null} props.wowGrowth - Week-over-week growth percentage (null if insufficient data)
- * @param {number} props.downloadsToday - Downloads in the latest daily delta
- * @param {number|null} props.goalNeeded - Downloads needed to hit 20% WoW target
+ * @param {number} props.valueToday - Count in the latest daily delta
+ * @param {number|null} props.goalNeeded - Count needed to hit 20% WoW target
  * @param {string|null} props.goalDeadline - YYYY-MM-DD deadline to hit 20% WoW target
+ * @param {string} [props.metricType='downloads'] - Active metric type key
  * @returns {JSX.Element}
  */
-export function SectionCards({ wowGrowth = null, downloadsToday = 0, goalNeeded = null, goalDeadline = null }) {
+export function SectionCards({ wowGrowth = null, valueToday = 0, goalNeeded = null, goalDeadline = null, metricType = 'downloads' }) {
+  const metricLabel = METRIC_LABELS[metricType] || 'Downloads'
   const hasGrowth = wowGrowth !== null
   const isGrowthUp = hasGrowth && wowGrowth > 0
   const isGrowthDown = hasGrowth && wowGrowth < 0
-  const isTodayUp = downloadsToday > 0
+  const isTodayUp = valueToday > 0
   const hasGoal = goalNeeded !== null && goalDeadline !== null
   const isGoalHit = hasGoal && goalNeeded === 0
 
@@ -92,7 +103,7 @@ export function SectionCards({ wowGrowth = null, downloadsToday = 0, goalNeeded 
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            {isGoalHit ? 'Target reached' : hasGoal ? `${fmt(goalNeeded)} downloads to go` : 'Need more data'}
+            {isGoalHit ? 'Target reached' : hasGoal ? `${fmt(goalNeeded)} to go` : 'Need more data'}
             {isGoalHit ? <TrendingUp className="size-4" /> : <Target className="size-4" />}
           </div>
           <div className="text-muted-foreground">
@@ -102,20 +113,20 @@ export function SectionCards({ wowGrowth = null, downloadsToday = 0, goalNeeded 
       </Card>
       <Card className="@container/card">
         <CardHeader>
-          <CardDescription>Downloads Today</CardDescription>
+          <CardDescription>{metricLabel} Today</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {fmt(downloadsToday)}
+            {fmt(valueToday)}
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
               {isTodayUp ? <TrendingUp /> : <TrendingDown />}
-              {isTodayUp ? `+${fmt(downloadsToday)}` : '0'}
+              {isTodayUp ? `+${fmt(valueToday)}` : '0'}
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            {isTodayUp ? 'New downloads today' : 'No new downloads yet'}
+            {isTodayUp ? `New ${metricLabel.toLowerCase()} today` : `No new ${metricLabel.toLowerCase()} yet`}
             {isTodayUp ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
           </div>
           <div className="text-muted-foreground">

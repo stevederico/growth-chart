@@ -38,36 +38,37 @@ function fmtDate(dateStr) {
   }).format(new Date(dateStr + 'T00:00:00'))
 }
 
+/** Human-readable labels for each metric type. */
+const METRIC_LABELS = {
+  downloads: 'Downloads',
+  stars: 'Stars',
+  forks: 'Forks',
+  views: 'Page Views',
+  clones: 'Clones',
+}
+
 /**
- * Per-release download breakdown table.
+ * Daily metric totals table.
  *
- * Shows each release tag, its cumulative download count,
- * and a 7-day trend indicator. Sorted by downloads descending.
- *
- * @component
- * @param {Object} props
- * @param {Array<{tag: string, download_count: number}>} props.data - Release download data
- * @returns {JSX.Element}
- */
-/**
- * Daily download totals table.
- *
- * Shows each date and its total new downloads, sorted most recent first.
+ * Shows each date and its total new count, sorted most recent first.
+ * Supports multiple metric types via the metricType prop.
  *
  * @component
  * @param {Object} props
  * @param {Array<{date: string, total: number}>} props.data - Daily delta data
+ * @param {string} [props.metricType='downloads'] - Active metric type key
  * @returns {JSX.Element}
  */
-export function DailyTable({ data = [] }) {
+export function DailyTable({ data = [], metricType = 'downloads' }) {
+  const metricLabel = METRIC_LABELS[metricType] || 'Downloads'
   const sorted = [...data].sort((a, b) => b.date.localeCompare(a.date))
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Daily Downloads</CardTitle>
+        <CardTitle>{`Daily ${metricLabel}`}</CardTitle>
         <CardDescription>
-          New downloads per day
+          {`New ${metricLabel.toLowerCase()} per day`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -76,7 +77,7 @@ export function DailyTable({ data = [] }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
-                <TableHead className="text-right">Downloads</TableHead>
+                <TableHead className="text-right">{metricLabel}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

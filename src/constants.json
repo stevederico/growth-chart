@@ -8,7 +8,7 @@
     },
     "appName": "Growth Chart",
     "appIcon": "chart-line",
-    "tagline": "GitHub Release Download Analytics",
+    "tagline": "GitHub Repository Analytics",
     "cta": "Get Started",
     "ctaHeading": "Ready to Get Started?",
     "noLogin": true,

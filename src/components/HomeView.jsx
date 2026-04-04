@@ -22,15 +22,25 @@ import { SectionCards } from './SectionCards.jsx';
 import { ChartAreaInteractive } from './ChartAreaInteractive.jsx';
 import { DailyTable } from './DataTable.jsx';
 
+/** Available metric types for the selector dropdown. */
+const METRIC_TYPES = {
+  downloads: { label: 'Downloads' },
+  stars: { label: 'Stars' },
+  forks: { label: 'Forks' },
+  views: { label: 'Page Views' },
+  clones: { label: 'Clones' },
+};
+
 /**
- * Downloads view for Growth Chart download analytics.
+ * Analytics view for Growth Chart metrics.
  *
- * Composes SectionCards (4 metric cards), ChartAreaInteractive (area chart
- * with time range toggle), and DataTable (per-release breakdown).
- * Fetches data from /api/downloads endpoints with optional repo filtering.
+ * Composes SectionCards (3 metric cards), ChartAreaInteractive (area chart
+ * with time range toggle), and DailyTable (daily breakdown).
+ * Supports multiple metric types (downloads, stars, forks, views, clones)
+ * with optional repo filtering.
  *
  * @component
- * @returns {JSX.Element} Downloads view
+ * @returns {JSX.Element} Analytics view
  */
 export default function HomeView() {
   const [snapshots, setSnapshots] = useState(null);
@@ -40,6 +50,7 @@ export default function HomeView() {
   const [error, setError] = useState(null);
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState('all');
+  const [selectedMetric, setSelectedMetric] = useState('downloads');
 
   useEffect(() => {
     apiRequest('/downloads/repos')
@@ -51,44 +62,68 @@ export default function HomeView() {
     try {
       setError(null);
       setIsLoading(true);
-      const repoParam = selectedRepo !== 'all' ? `?repo=${encodeURIComponent(selectedRepo)}` : '';
-      const [allData, latest, daily] = await Promise.all([
-        apiRequest(`/downloads${repoParam}`),
-        apiRequest(`/downloads/latest${repoParam}`),
-        apiRequest(`/downloads/daily${repoParam}`),
-      ]);
-      setSnapshots(allData);
-      setLatestSnapshot(latest);
-      setDailyData(daily);
+      if (selectedMetric === 'downloads') {
+        const repoParam = selectedRepo !== 'all' ? `?repo=${encodeURIComponent(selectedRepo)}` : '';
+        const [allData, latest, daily] = await Promise.all([
+          apiRequest(`/downloads${repoParam}`),
+          apiRequest(`/downloads/latest${repoParam}`),
+          apiRequest(`/downloads/daily${repoParam}`),
+        ]);
+        setSnapshots(allData);
+        setLatestSnapshot(latest);
+        setDailyData(daily);
+      } else {
+        const repoParam = selectedRepo !== 'all' ? `&repo=${encodeURIComponent(selectedRepo)}` : '';
+        const params = `?metric=${selectedMetric}${repoParam}`;
+        const [allData, latest, daily] = await Promise.all([
+          apiRequest(`/metrics${params}`),
+          apiRequest(`/metrics/latest${params}`),
+          apiRequest(`/metrics/daily${params}`),
+        ]);
+        setSnapshots(allData);
+        setLatestSnapshot(latest);
+        setDailyData(daily);
+      }
     } catch (err) {
-      console.error('Failed to fetch download data:', err);
-      setError('Unable to load download data. Please try again.');
+      console.error('Failed to fetch data:', err);
+      setError('Unable to load data. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedRepo]);
+  }, [selectedRepo, selectedMetric]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  /** Build chart data from snapshots — one point per date with total downloads */
+  /** Build chart data from snapshots — one point per date with total count */
   const chartData = useMemo(() => {
     if (!snapshots?.length) return [];
+    if (selectedMetric === 'downloads') {
+      const byDate = new Map();
+      for (const s of snapshots) {
+        const current = byDate.get(s.date) || 0;
+        byDate.set(s.date, current + s.download_count);
+      }
+      return [...byDate.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, total]) => ({ date, total }));
+    }
+    // Metrics: group by date, sum count across repos
     const byDate = new Map();
     for (const s of snapshots) {
       const current = byDate.get(s.date) || 0;
-      byDate.set(s.date, current + s.download_count);
+      byDate.set(s.date, current + s.count);
     }
     return [...byDate.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, total]) => ({ date, total }));
-  }, [snapshots]);
+  }, [snapshots, selectedMetric]);
 
   /** Derive stats from the latest snapshot and daily deltas */
   const stats = useMemo(() => {
     if (!latestSnapshot) {
-      return { wowGrowth: null, downloadsToday: 0, goalNeeded: null, goalDeadline: null };
+      return { wowGrowth: null, valueToday: 0, goalNeeded: null, goalDeadline: null };
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -123,7 +158,7 @@ export default function HomeView() {
       }
     }
 
-    return { wowGrowth, downloadsToday, goalNeeded, goalDeadline };
+    return { wowGrowth, valueToday: downloadsToday, goalNeeded, goalDeadline };
   }, [latestSnapshot, dailyData, chartData]);
 
   const repoSelector = repos.length > 1 && (
@@ -142,10 +177,26 @@ export default function HomeView() {
     </Select>
   );
 
+  const metricSelector = (
+    <Select value={selectedMetric} onValueChange={setSelectedMetric}>
+      <SelectTrigger className="w-[160px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {Object.entries(METRIC_TYPES).map(([key, { label }]) => (
+          <SelectItem key={key} value={key}>{label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
   if (isLoading) {
     return (
       <>
-        <Header title="Downloads">{repoSelector}</Header>
+        <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+          {metricSelector}
+          {repoSelector}
+        </Header>
         <div className="flex flex-1 items-center justify-center">
           <Spinner />
         </div>
@@ -156,7 +207,10 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title="Downloads">{repoSelector}</Header>
+        <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+          {metricSelector}
+          {repoSelector}
+        </Header>
         <div className="flex flex-1 items-center justify-center">
           <Empty>
             <EmptyHeader>
@@ -175,21 +229,25 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title="Downloads">{repoSelector}</Header>
+      <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+        {metricSelector}
+        {repoSelector}
+      </Header>
       <div className="flex flex-1 flex-col">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
             <div className="px-4 lg:px-6">
-              <ChartAreaInteractive data={chartData} dailyData={dailyData || []} />
+              <ChartAreaInteractive data={chartData} dailyData={dailyData || []} metricType={selectedMetric} />
             </div>
             <SectionCards
               wowGrowth={stats.wowGrowth}
-              downloadsToday={stats.downloadsToday}
+              valueToday={stats.valueToday}
               goalNeeded={stats.goalNeeded}
               goalDeadline={stats.goalDeadline}
+              metricType={selectedMetric}
             />
             <div className="px-4 lg:px-6">
-              <DailyTable data={dailyData || []} />
+              <DailyTable data={dailyData || []} metricType={selectedMetric} />
             </div>
           </div>
         </div>

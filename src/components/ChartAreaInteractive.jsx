@@ -27,9 +27,13 @@ function fmtDate(str) {
   }).format(parseLocalDate(str))
 }
 
-const MODES = {
-  total: { label: "Total Downloads", description: "Cumulative downloads over time" },
-  growth: { label: "Daily Downloads", description: "New downloads per day" },
+/** Human-readable labels for each metric type. */
+const METRIC_LABELS = {
+  downloads: 'Downloads',
+  stars: 'Stars',
+  forks: 'Forks',
+  views: 'Page Views',
+  clones: 'Clones',
 }
 
 /**
@@ -38,40 +42,47 @@ const MODES = {
  * @param {Object} props - Recharts tooltip callback props
  * @param {boolean} props.active
  * @param {Array} props.payload
+ * @param {string} [props.metricType='downloads'] - Current metric type for label
  * @returns {JSX.Element|null}
  */
-function CustomTooltip({ active, payload }) {
+function CustomTooltip({ active, payload, metricType = 'downloads' }) {
   if (!active || !payload?.length) return null
   const { date, total } = payload[0].payload
+  const label = (METRIC_LABELS[metricType] || 'Downloads').toLowerCase()
   return (
     <div className="border-border/50 bg-background rounded-lg border px-3 py-2 text-xs shadow-xl">
       <div className="font-medium">{fmtDate(date)}</div>
       <div className="text-muted-foreground mt-1 tabular-nums">
-        {total.toLocaleString()} downloads
+        {total.toLocaleString()} {label}
       </div>
     </div>
   )
 }
 
 /**
- * Interactive area chart — Total (cumulative) or Daily (new downloads per day).
+ * Interactive area chart — Total (cumulative) or Daily (new per day).
+ *
+ * Supports multiple metric types (downloads, stars, forks, views, clones)
+ * with a toggle between cumulative and daily views.
  *
  * @component
  * @param {Object} props
- * @param {Array<{date: string, total: number}>} props.data - Cumulative download snapshots
- * @param {Array<{date: string, total: number}>} props.dailyData - Daily download deltas
+ * @param {Array<{date: string, total: number}>} props.data - Cumulative metric snapshots
+ * @param {Array<{date: string, total: number}>} props.dailyData - Daily metric deltas
+ * @param {string} [props.metricType='downloads'] - Active metric type key
  * @returns {JSX.Element}
  */
-export function ChartAreaInteractive({ data = [], dailyData = [] }) {
+export function ChartAreaInteractive({ data = [], dailyData = [], metricType = 'downloads' }) {
   const [mode, setMode] = React.useState("total")
   const activeData = mode === "growth" ? dailyData : data
+  const label = METRIC_LABELS[metricType] || 'Downloads'
 
   return (
     <Card className="@container/card">
       <CardHeader>
-        <CardTitle>{MODES[mode].label}</CardTitle>
+        <CardTitle>{mode === 'total' ? `Total ${label}` : `Daily ${label}`}</CardTitle>
         <CardDescription>
-          {MODES[mode].description}
+          {mode === 'total' ? `Cumulative ${label.toLowerCase()} over time` : `New ${label.toLowerCase()} per day`}
         </CardDescription>
         <CardAction>
           <ToggleGroup
@@ -119,7 +130,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
                   width={40}
                   className="fill-muted-foreground text-xs"
                 />
-                <Tooltip content={CustomTooltip} cursor={false} />
+                <Tooltip content={(props) => <CustomTooltip {...props} metricType={metricType} />} cursor={false} />
                 <Area
                   dataKey="total"
                   type="natural"

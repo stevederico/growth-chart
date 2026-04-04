@@ -1,5 +1,12 @@
 ## CHANGELOG
 
+0.13.0
+
+  Add GitHub metrics tracking
+  Add metrics API routes
+  Add metric type selector
+  Add .env.example template
+
 0.12.0
 
   Store repos in SQLite
