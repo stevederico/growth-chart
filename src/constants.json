@@ -40,7 +40,7 @@
         {
             "title": "Dashboard",
             "url": "home",
-            "icon": "chart-line"
+            "icon": "bar-chart-3"
         }
     ],
     "stripeProducts": [],

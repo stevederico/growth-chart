@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { CircleAlert, Download, Star, GitFork, Eye, Copy, Plus } from 'lucide-react';
+import { CircleAlert, Download, Star, GitFork, Eye, Copy, Plus, Github } from 'lucide-react';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
 import { Button } from '@stevederico/skateboard-ui/shadcn/ui/button';
@@ -215,9 +215,12 @@ export default function HomeView() {
     <>
       <Select value={selectedRepo || ''} onValueChange={handleRepoChange}>
         <SelectTrigger className="w-[200px]">
-          {selectedRepo && selectedRepo !== 'all'
-            ? selectedRepo.split('/')[1] || selectedRepo
-            : 'All Repos'}
+          <span className="flex items-center gap-2">
+            <Github size={14} />
+            {selectedRepo && selectedRepo !== 'all'
+              ? selectedRepo.split('/')[1] || selectedRepo
+              : 'All Repos'}
+          </span>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Repos</SelectItem>
