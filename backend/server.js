@@ -1394,10 +1394,12 @@ app.post('/api/repos', async (c) => {
 
   const inserted = downloadsDb.prepare('SELECT id, repo, created_at FROM repos WHERE repo = ?').get(repo);
 
-  // Trigger initial snapshot for the new repo
-  fetchDownloadSnapshot(repo).catch(err => {
-    logger.error('Initial snapshot failed for new repo', { repo, error: err.message });
-  });
+  // Fetch all snapshots before responding so data is available immediately
+  const fetchers = [fetchDownloadSnapshot, fetchStarsSnapshot, fetchForksSnapshot];
+  if (GITHUB_TOKEN) {
+    fetchers.push(fetchTrafficClones, fetchTrafficViews);
+  }
+  await Promise.allSettled(fetchers.map(fn => fn(repo)));
 
   return c.json(inserted, 201);
 });
