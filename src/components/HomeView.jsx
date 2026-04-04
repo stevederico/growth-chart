@@ -55,7 +55,7 @@ export default function HomeView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [repos, setRepos] = useState([]);
-  const [selectedRepo, setSelectedRepo] = useState('all');
+  const [selectedRepo, setSelectedRepo] = useState(null);
   const [selectedMetric, setSelectedMetric] = useState('downloads');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newRepo, setNewRepo] = useState('');
@@ -68,6 +68,13 @@ export default function HomeView() {
   }, []);
 
   useEffect(() => { fetchRepos(); }, [fetchRepos]);
+
+  // Default to first repo once loaded
+  useEffect(() => {
+    if (repos.length > 0 && !selectedRepo) {
+      setSelectedRepo(repos[0]);
+    }
+  }, [repos, selectedRepo]);
 
   /** Add a new repo via API, refresh the list, and select it. */
   const handleAddRepo = useCallback(async () => {
@@ -93,6 +100,7 @@ export default function HomeView() {
   }, [newRepo, fetchRepos]);
 
   const fetchData = useCallback(async () => {
+    if (!selectedRepo) return;
     try {
       setError(null);
       setIsLoading(true);
@@ -205,9 +213,9 @@ export default function HomeView() {
 
   const repoSelector = (
     <>
-      <Select value={selectedRepo} onValueChange={handleRepoChange}>
+      <Select value={selectedRepo || ''} onValueChange={handleRepoChange}>
         <SelectTrigger className="w-[200px]">
-          <SelectValue placeholder="All Repos" />
+          <SelectValue placeholder="Select Repo" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Repos</SelectItem>
@@ -255,7 +263,7 @@ export default function HomeView() {
       <SelectTrigger className="w-[170px]">
         <span className="flex items-center gap-2">
           {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
-          {METRIC_TYPES[selectedMetric]?.label || 'Downloads'}
+          {"Dashboard"}
         </span>
       </SelectTrigger>
       <SelectContent>
@@ -273,7 +281,7 @@ export default function HomeView() {
   if (isLoading) {
     return (
       <>
-        <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+        <Header title={"Dashboard"}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -287,7 +295,7 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+        <Header title={"Dashboard"}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -309,7 +317,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title={METRIC_TYPES[selectedMetric]?.label || 'Downloads'}>
+      <Header title={"Dashboard"}>
         {metricSelector}
         {repoSelector}
       </Header>

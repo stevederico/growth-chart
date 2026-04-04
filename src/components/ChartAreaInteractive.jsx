@@ -73,7 +73,7 @@ function CustomTooltip({ active, payload, metricType = 'downloads' }) {
  * @returns {JSX.Element}
  */
 export function ChartAreaInteractive({ data = [], dailyData = [], metricType = 'downloads' }) {
-  const [mode, setMode] = React.useState("total")
+  const [mode, setMode] = React.useState("growth")
   const activeData = mode === "growth" ? dailyData : data
   const label = METRIC_LABELS[metricType] || 'Downloads'
 
@@ -93,8 +93,8 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
             variant="outline"
             className="*:data-[slot=toggle-group-item]:!px-4"
           >
-            <ToggleGroupItem value="total">Total</ToggleGroupItem>
             <ToggleGroupItem value="growth">Daily</ToggleGroupItem>
+            <ToggleGroupItem value="total">Total</ToggleGroupItem>
           </ToggleGroup>
         </CardAction>
       </CardHeader>
