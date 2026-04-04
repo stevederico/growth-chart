@@ -111,6 +111,11 @@ export default function HomeView() {
           apiRequest(`/downloads/latest${repoParam}`),
           apiRequest(`/downloads/daily${repoParam}`),
         ]);
+        // Fall back to stars if no download data
+        if (!allData?.length) {
+          setSelectedMetric('stars');
+          return;
+        }
         setSnapshots(allData);
         setLatestSnapshot(latest);
         setDailyData(daily);
