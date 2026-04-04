@@ -268,7 +268,7 @@ export default function HomeView() {
       <SelectTrigger className="w-[170px]">
         <span className="flex items-center gap-2">
           {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
-          {"Dashboard"}
+          {METRIC_TYPES[selectedMetric]?.label || 'Downloads'}
         </span>
       </SelectTrigger>
       <SelectContent>
