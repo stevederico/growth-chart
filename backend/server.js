@@ -931,6 +931,24 @@ const GITHUB_REPOS = (process.env.GITHUB_REPOS || process.env.GITHUB_REPO || '')
   .map(r => r.trim())
   .filter(Boolean);
 
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+
+/**
+ * Build headers for GitHub API requests.
+ * @param {boolean} [authenticated=false] - Include Authorization header
+ * @returns {Object} Headers object
+ */
+function githubHeaders(authenticated = false) {
+  const headers = {
+    'User-Agent': 'GrowthChart-Bot/1.0',
+    'Accept': 'application/vnd.github+json',
+  };
+  if (authenticated && GITHUB_TOKEN) {
+    headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
+  }
+  return headers;
+}
+
 try { mkdirSync('./backend/databases', { recursive: true }); } catch {}
 const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './backend/databases/GrowthChart.db');
 downloadsDb.exec('PRAGMA journal_mode = WAL');
@@ -981,6 +999,22 @@ if (repoCount.count === 0 && GITHUB_REPOS.length > 0) {
   logger.info('Seeded repos table from GITHUB_REPOS env var', { count: GITHUB_REPOS.length });
 }
 
+downloadsDb.exec(`
+  CREATE TABLE IF NOT EXISTS github_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL,
+    date TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    uniques INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+downloadsDb.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_github_metrics_repo_date_metric
+    ON github_metrics(repo, date, metric)
+`);
+
 /** Read all repo records from the database. */
 function getReposFromDb() {
   return downloadsDb.prepare('SELECT id, repo, created_at FROM repos ORDER BY created_at ASC').all();
@@ -1021,7 +1055,7 @@ async function fetchDownloadSnapshot(repo) {
   try {
     const response = await fetch(
       `https://api.github.com/repos/${repo}/releases?per_page=100`,
-      { headers: { 'User-Agent': 'GrowthChart-Bot/1.0', 'Accept': 'application/vnd.github+json' } }
+      { headers: githubHeaders() }
     );
 
     if (!response.ok) {
@@ -1084,6 +1118,232 @@ async function fetchAllSnapshots() {
 }
 
 /**
+ * Fetch GitHub traffic clone counts for a repo and upsert daily rows.
+ *
+ * Calls GET /repos/{owner}/{repo}/traffic/clones (requires auth).
+ * Each entry in the response clones array is upserted into github_metrics
+ * with metric='clones'. Skips entirely if GITHUB_TOKEN is not set.
+ *
+ * @async
+ * @param {string} repo - GitHub repo in "owner/name" format
+ * @returns {Promise<void>}
+ */
+async function fetchTrafficClones(repo) {
+  if (!GITHUB_TOKEN) {
+    logger.warn('GITHUB_TOKEN not set, skipping traffic clones', { repo });
+    return;
+  }
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/traffic/clones`,
+      { headers: githubHeaders(true) }
+    );
+
+    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+    if (rateLimitRemaining) {
+      logger.debug('GitHub rate limit remaining (clones)', { remaining: rateLimitRemaining });
+    }
+
+    if (!response.ok) {
+      logger.warn('GitHub traffic/clones API failed', { repo, status: response.status, rateLimitRemaining });
+      return;
+    }
+
+    const data = await response.json();
+    const insertStmt = downloadsDb.prepare(
+      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'clones', ?, ?)`
+    );
+    for (const entry of (data.clones || [])) {
+      const date = new Date(entry.timestamp).toISOString().split('T')[0];
+      insertStmt.run(repo, date, entry.count || 0, entry.uniques || 0);
+    }
+    logger.info('Traffic clones snapshot saved', { repo, entries: (data.clones || []).length });
+  } catch (err) {
+    logger.error('Failed to fetch traffic clones', { repo, error: err.message });
+  }
+}
+
+/**
+ * Fetch GitHub traffic view counts for a repo and upsert daily rows.
+ *
+ * Calls GET /repos/{owner}/{repo}/traffic/views (requires auth).
+ * Each entry in the response views array is upserted into github_metrics
+ * with metric='views'. Skips entirely if GITHUB_TOKEN is not set.
+ *
+ * @async
+ * @param {string} repo - GitHub repo in "owner/name" format
+ * @returns {Promise<void>}
+ */
+async function fetchTrafficViews(repo) {
+  if (!GITHUB_TOKEN) {
+    logger.warn('GITHUB_TOKEN not set, skipping traffic views', { repo });
+    return;
+  }
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/traffic/views`,
+      { headers: githubHeaders(true) }
+    );
+
+    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+    if (rateLimitRemaining) {
+      logger.debug('GitHub rate limit remaining (views)', { remaining: rateLimitRemaining });
+    }
+
+    if (!response.ok) {
+      logger.warn('GitHub traffic/views API failed', { repo, status: response.status, rateLimitRemaining });
+      return;
+    }
+
+    const data = await response.json();
+    const insertStmt = downloadsDb.prepare(
+      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'views', ?, ?)`
+    );
+    for (const entry of (data.views || [])) {
+      const date = new Date(entry.timestamp).toISOString().split('T')[0];
+      insertStmt.run(repo, date, entry.count || 0, entry.uniques || 0);
+    }
+    logger.info('Traffic views snapshot saved', { repo, entries: (data.views || []).length });
+  } catch (err) {
+    logger.error('Failed to fetch traffic views', { repo, error: err.message });
+  }
+}
+
+/**
+ * Fetch current stargazer count for a repo and store as today's snapshot.
+ *
+ * Calls GET /repos/{owner}/{repo} and stores stargazers_count with
+ * metric='stars'. Uses auth token if available for higher rate limits.
+ * Idempotent — checks for existing row before inserting.
+ *
+ * @async
+ * @param {string} repo - GitHub repo in "owner/name" format
+ * @returns {Promise<void>}
+ */
+async function fetchStarsSnapshot(repo) {
+  const today = new Date().toISOString().split('T')[0];
+  const existing = downloadsDb.prepare(
+    "SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = 'stars'"
+  ).get(repo, today);
+  if (existing.count > 0) {
+    logger.debug('Stars snapshot already exists for today', { repo, date: today });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}`,
+      { headers: githubHeaders(!!GITHUB_TOKEN) }
+    );
+
+    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+    if (rateLimitRemaining) {
+      logger.debug('GitHub rate limit remaining (stars)', { remaining: rateLimitRemaining });
+    }
+
+    if (!response.ok) {
+      logger.warn('GitHub repo API failed (stars)', { repo, status: response.status, rateLimitRemaining });
+      return;
+    }
+
+    const data = await response.json();
+    downloadsDb.prepare(
+      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'stars', ?, 0)`
+    ).run(repo, today, data.stargazers_count || 0);
+    logger.info('Stars snapshot saved', { repo, date: today, stars: data.stargazers_count });
+  } catch (err) {
+    logger.error('Failed to fetch stars snapshot', { repo, error: err.message });
+  }
+}
+
+/**
+ * Fetch current fork count for a repo and store as today's snapshot.
+ *
+ * Calls GET /repos/{owner}/{repo} and stores forks_count with
+ * metric='forks'. Uses auth token if available for higher rate limits.
+ * Idempotent — checks for existing row before inserting.
+ *
+ * @async
+ * @param {string} repo - GitHub repo in "owner/name" format
+ * @returns {Promise<void>}
+ */
+async function fetchForksSnapshot(repo) {
+  const today = new Date().toISOString().split('T')[0];
+  const existing = downloadsDb.prepare(
+    "SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = 'forks'"
+  ).get(repo, today);
+  if (existing.count > 0) {
+    logger.debug('Forks snapshot already exists for today', { repo, date: today });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}`,
+      { headers: githubHeaders(!!GITHUB_TOKEN) }
+    );
+
+    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+    if (rateLimitRemaining) {
+      logger.debug('GitHub rate limit remaining (forks)', { remaining: rateLimitRemaining });
+    }
+
+    if (!response.ok) {
+      logger.warn('GitHub repo API failed (forks)', { repo, status: response.status, rateLimitRemaining });
+      return;
+    }
+
+    const data = await response.json();
+    downloadsDb.prepare(
+      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'forks', ?, 0)`
+    ).run(repo, today, data.forks_count || 0);
+    logger.info('Forks snapshot saved', { repo, date: today, forks: data.forks_count });
+  } catch (err) {
+    logger.error('Failed to fetch forks snapshot', { repo, error: err.message });
+  }
+}
+
+/**
+ * Fetch all GitHub metric snapshots for every tracked repo.
+ *
+ * Iterates getRepoListFromDb() and calls fetchTrafficClones,
+ * fetchTrafficViews, fetchStarsSnapshot, and fetchForksSnapshot
+ * for each. Errors per-repo are logged but do not stop processing.
+ *
+ * @async
+ * @returns {Promise<void>}
+ */
+async function fetchAllMetricSnapshots() {
+  const repos = getRepoListFromDb();
+  if (repos.length === 0) {
+    logger.warn('No repos configured, skipping metric snapshots');
+    return;
+  }
+  for (const repo of repos) {
+    try {
+      await fetchTrafficClones(repo);
+    } catch (err) {
+      logger.error('Traffic clones failed for repo', { repo, error: err.message });
+    }
+    try {
+      await fetchTrafficViews(repo);
+    } catch (err) {
+      logger.error('Traffic views failed for repo', { repo, error: err.message });
+    }
+    try {
+      await fetchStarsSnapshot(repo);
+    } catch (err) {
+      logger.error('Stars snapshot failed for repo', { repo, error: err.message });
+    }
+    try {
+      await fetchForksSnapshot(repo);
+    } catch (err) {
+      logger.error('Forks snapshot failed for repo', { repo, error: err.message });
+    }
+  }
+}
+
+/**
  * GET /api/downloads/repos — Return the list of configured repos.
  */
 app.get('/api/downloads/repos', (c) => {
@@ -1114,7 +1374,7 @@ app.post('/api/repos', async (c) => {
 
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}`, {
-      headers: { 'User-Agent': 'GrowthChart-Bot/1.0', 'Accept': 'application/vnd.github+json' }
+      headers: githubHeaders()
     });
     if (!res.ok) {
       return c.json({ error: `GitHub repo "${repo}" not found` }, 400);
@@ -1381,6 +1641,169 @@ app.post('/api/downloads/backfill', async (c) => {
   } catch (err) {
     logger.error('Backfill failed', { error: err.message });
     return c.json({ error: 'Backfill failed: ' + err.message }, 500);
+  }
+});
+
+// ==== GITHUB METRICS ROUTES ====
+
+const VALID_METRICS = ['stars', 'forks', 'clones', 'views'];
+
+/**
+ * GET /api/metrics — Query github_metrics rows.
+ * Required query param: metric (stars|forks|clones|views).
+ * Optional: repo, from, to.
+ */
+app.get('/api/metrics', (c) => {
+  try {
+    const metric = c.req.query('metric');
+    if (!metric || !VALID_METRICS.includes(metric)) {
+      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
+    }
+
+    const repo = c.req.query('repo');
+    const from = c.req.query('from');
+    const to = c.req.query('to');
+
+    let sql = 'SELECT repo, date, metric, count, uniques FROM github_metrics WHERE metric = ?';
+    const params = [metric];
+
+    if (repo) {
+      sql += ' AND repo = ?';
+      params.push(repo);
+    }
+    if (from) {
+      sql += ' AND date >= ?';
+      params.push(from);
+    }
+    if (to) {
+      sql += ' AND date <= ?';
+      params.push(to);
+    }
+
+    sql += ' ORDER BY date DESC';
+    const rows = downloadsDb.prepare(sql).all(...params);
+    return c.json(rows);
+  } catch (err) {
+    logger.error('Failed to fetch metrics', { error: err.message });
+    return c.json({ error: 'Failed to fetch metrics' }, 500);
+  }
+});
+
+/**
+ * GET /api/metrics/daily — Day-over-day deltas for a metric.
+ * Required query param: metric. Optional: repo.
+ * Returns [{date, total}] matching /api/downloads/daily shape.
+ */
+app.get('/api/metrics/daily', (c) => {
+  try {
+    const metric = c.req.query('metric');
+    if (!metric || !VALID_METRICS.includes(metric)) {
+      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
+    }
+
+    const repo = c.req.query('repo');
+    let sql = 'SELECT date, SUM(count) as count, SUM(uniques) as uniques FROM github_metrics WHERE metric = ?';
+    const params = [metric];
+
+    if (repo) {
+      sql += ' AND repo = ?';
+      params.push(repo);
+    }
+
+    sql += ' GROUP BY date ORDER BY date ASC';
+    const rows = downloadsDb.prepare(sql).all(...params);
+
+    const dailyDeltas = [];
+    for (let i = 1; i < rows.length; i++) {
+      const delta = rows[i].count - rows[i - 1].count;
+      dailyDeltas.push({ date: rows[i].date, total: delta });
+    }
+
+    return c.json(dailyDeltas);
+  } catch (err) {
+    logger.error('Failed to compute metric daily deltas', { error: err.message });
+    return c.json({ error: 'Failed to compute metric daily deltas' }, 500);
+  }
+});
+
+/**
+ * GET /api/metrics/latest — Most recent snapshot for a metric.
+ * Required query param: metric. Optional: repo.
+ * Returns {date, count, uniques}.
+ */
+app.get('/api/metrics/latest', (c) => {
+  try {
+    const metric = c.req.query('metric');
+    if (!metric || !VALID_METRICS.includes(metric)) {
+      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
+    }
+
+    const repo = c.req.query('repo');
+    let sql = 'SELECT date, SUM(count) as count, SUM(uniques) as uniques FROM github_metrics WHERE metric = ?';
+    const params = [metric];
+
+    if (repo) {
+      sql += ' AND repo = ?';
+      params.push(repo);
+    }
+
+    sql += ' ORDER BY date DESC LIMIT 1';
+    const row = downloadsDb.prepare(sql).get(...params);
+
+    if (!row) {
+      return c.json({ date: null, count: 0, uniques: 0 });
+    }
+
+    return c.json({ date: row.date, count: row.count, uniques: row.uniques });
+  } catch (err) {
+    logger.error('Failed to fetch latest metric', { error: err.message });
+    return c.json({ error: 'Failed to fetch latest metric' }, 500);
+  }
+});
+
+/**
+ * POST /api/metrics/snapshot — Manually trigger metric snapshot.
+ * Optional body: {metric, repo}. If omitted, fetches all metrics for all repos.
+ */
+app.post('/api/metrics/snapshot', async (c) => {
+  try {
+    let metric;
+    let repo;
+    try {
+      const body = await c.req.json();
+      metric = body?.metric;
+      repo = body?.repo;
+    } catch {
+      // No body or invalid JSON — fetch all
+    }
+
+    if (metric && !VALID_METRICS.includes(metric)) {
+      return c.json({ error: `Invalid metric, must be one of: ${VALID_METRICS.join(', ')}` }, 400);
+    }
+
+    const repos = repo ? [repo] : getRepoListFromDb();
+    const metricsToFetch = metric ? [metric] : VALID_METRICS;
+
+    const fetchMap = {
+      clones: fetchTrafficClones,
+      views: fetchTrafficViews,
+      stars: fetchStarsSnapshot,
+      forks: fetchForksSnapshot,
+    };
+
+    for (const r of repos) {
+      for (const m of metricsToFetch) {
+        try {
+          await fetchMap[m](r);
+        } catch (err) {
+          logger.error('Metric snapshot failed', { repo: r, metric: m, error: err.message });
+        }
+      }
+    }
+
+    return c.json({ message: 'Metric snapshots completed', repos, metrics: metricsToFetch }, 201);
+  } catch (err) {
+    return c.json({ error: 'Failed to fetch metric snapshot: ' + err.message }, 500);
   }
 });
 
@@ -1921,6 +2344,7 @@ function loadEnvFile(filePath) {
 // ==== DOWNLOAD SNAPSHOT ====
 // Run once on startup
 fetchAllSnapshots().catch(() => {});
+fetchAllMetricSnapshots().catch(() => {});
 
 // Hourly check: if today's snapshot is missing for any repo, take one.
 // Handles the case where the server stays running across midnight
@@ -1928,6 +2352,12 @@ fetchAllSnapshots().catch(() => {});
 setInterval(async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
+    const fetchMap = {
+      clones: fetchTrafficClones,
+      views: fetchTrafficViews,
+      stars: fetchStarsSnapshot,
+      forks: fetchForksSnapshot,
+    };
     for (const repo of getRepoListFromDb()) {
       const row = downloadsDb.prepare(
         'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
@@ -1938,6 +2368,19 @@ setInterval(async () => {
           await fetchDownloadSnapshot(repo);
         } catch (err) {
           logger.error('Hourly snapshot failed for repo', { repo, error: err.message });
+        }
+      }
+
+      for (const metric of VALID_METRICS) {
+        const metricRow = downloadsDb.prepare(
+          'SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = ?'
+        ).get(repo, today, metric);
+        if (metricRow.count === 0) {
+          try {
+            await fetchMap[metric](repo);
+          } catch (err) {
+            logger.error('Hourly metric snapshot failed', { repo, metric, error: err.message });
+          }
         }
       }
     }
