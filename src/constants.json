@@ -41,6 +41,11 @@
             "title": "Downloads",
             "url": "home",
             "icon": "download"
+        },
+        {
+            "title": "Settings",
+            "url": "settings",
+            "icon": "settings"
         }
     ],
     "stripeProducts": [],
