@@ -41,11 +41,6 @@
             "title": "Dashboard",
             "url": "home",
             "icon": "bar-chart-3"
-        },
-        {
-            "title": "Settings",
-            "url": "settings",
-            "icon": "settings"
         }
     ],
     "stripeProducts": [],
