@@ -1716,6 +1716,9 @@ app.get('/api/metrics/daily', (c) => {
     const rows = downloadsDb.prepare(sql).all(...params);
 
     const dailyDeltas = [];
+    if (rows.length > 0) {
+      dailyDeltas.push({ date: rows[0].date, total: rows[0].count });
+    }
     for (let i = 1; i < rows.length; i++) {
       const delta = rows[i].count - rows[i - 1].count;
       dailyDeltas.push({ date: rows[i].date, total: delta });
