@@ -248,10 +248,15 @@ export default function HomeView() {
     </>
   );
 
+  const SelectedMetricIcon = METRIC_TYPES[selectedMetric]?.icon;
+
   const metricSelector = (
     <Select value={selectedMetric} onValueChange={setSelectedMetric}>
       <SelectTrigger className="w-[170px]">
-        <SelectValue />
+        <span className="flex items-center gap-2">
+          {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
+          {METRIC_TYPES[selectedMetric]?.label || 'Downloads'}
+        </span>
       </SelectTrigger>
       <SelectContent>
         {Object.entries(METRIC_TYPES).map(([key, { label, icon: Icon }]) => (
