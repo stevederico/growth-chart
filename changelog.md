@@ -1,5 +1,13 @@
 ## CHANGELOG
 
+0.14.0
+
+  Remove dead code files
+  Remove unused imports
+  Remove dead DataTable export
+  Remove dead rate-limit code
+  Remove unused dependencies
+
 0.13.0
 
   Add GitHub metrics tracking

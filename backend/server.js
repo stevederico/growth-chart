@@ -14,7 +14,7 @@ import { databaseManager } from "./adapters/manager.js";
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile, mkdir, mkdirSync, stat, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFile, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 // ==== SERVER CONFIG ====
@@ -204,60 +204,13 @@ setInterval(() => {
 }, 60 * 60 * 1000); // Run every hour
 
 // ==== RATE LIMITING ====
-const rateLimitStore = new Map(); // key -> { count, resetAt }
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX_ENTRIES = 100000; // LRU eviction threshold
-
-// Route-specific rate limits
-const RATE_LIMITS = {
-  auth: { limit: 10, window: RATE_LIMIT_WINDOW },       // /api/signin, /api/signup
-  payment: { limit: 5, window: RATE_LIMIT_WINDOW },     // /api/checkout, /api/portal
-  global: { limit: 300, window: RATE_LIMIT_WINDOW }     // all other /api routes
-};
 
 /**
- * Get client IP address from request
- *
- * Checks X-Forwarded-For header first (for proxies), falls back to
- * socket address. Handles comma-separated forwarded IPs.
- *
- * @param {Context} c - Hono context
- * @returns {string} Client IP address
- */
-function getClientIP(c) {
-  const forwarded = c.req.header('x-forwarded-for');
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
-  }
-  return c.req.raw?.socket?.remoteAddress || 'unknown';
-}
-
-/**
- * Get rate limit category for a given path
- *
- * @param {string} path - Request path
- * @returns {string} Rate limit category: 'auth', 'payment', or 'global'
- */
-function getRateLimitCategory(path) {
-  if (path === '/api/signin' || path === '/api/signup') {
-    return 'auth';
-  }
-  if (path === '/api/checkout' || path === '/api/portal') {
-    return 'payment';
-  }
-  return 'global';
-}
-
-/**
- * Rate limiting middleware
- *
- * Tracks requests per IP+category with sliding window. Returns 429 when
- * limit exceeded. Adds X-RateLimit-Remaining and Retry-After headers.
+ * Rate limiting middleware (stub)
  *
  * @async
  * @param {Context} c - Hono context
  * @param {Function} next - Next middleware function
- * @returns {Promise<Response|void>} 429 error or continues to next middleware
  */
 async function rateLimitMiddleware(c, next) {
   await next();

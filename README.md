@@ -224,4 +224,7 @@ MIT License — see [LICENSE](LICENSE) for details.
   <p>
     Built by <a href="https://github.com/stevederico">Steve Derico</a>
   </p>
+  <p>
+    Made with <a href="https://github.com/stevederico/skateboard">Skateboard</a> — a React boilerplate with auth and payments
+  </p>
 </div>
