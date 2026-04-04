@@ -215,7 +215,9 @@ export default function HomeView() {
     <>
       <Select value={selectedRepo || ''} onValueChange={handleRepoChange}>
         <SelectTrigger className="w-[200px]">
-          <SelectValue placeholder="Select Repo" />
+          {selectedRepo && selectedRepo !== 'all'
+            ? selectedRepo.split('/')[1] || selectedRepo
+            : 'All Repos'}
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Repos</SelectItem>
