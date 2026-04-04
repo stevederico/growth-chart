@@ -1692,7 +1692,9 @@ app.get('/api/metrics', (c) => {
 });
 
 /**
- * GET /api/metrics/daily — Day-over-day deltas for a metric.
+ * GET /api/metrics/daily — Daily values for a metric.
+ * Clones and views are already per-day values from GitHub.
+ * Stars and forks are cumulative, so day-over-day deltas are computed.
  * Required query param: metric. Optional: repo.
  * Returns [{date, total}] matching /api/downloads/daily shape.
  */
@@ -1715,16 +1717,25 @@ app.get('/api/metrics/daily', (c) => {
     sql += ' GROUP BY date ORDER BY date ASC';
     const rows = downloadsDb.prepare(sql).all(...params);
 
-    const dailyDeltas = [];
-    if (rows.length > 0) {
-      dailyDeltas.push({ date: rows[0].date, total: rows[0].count });
-    }
-    for (let i = 1; i < rows.length; i++) {
-      const delta = rows[i].count - rows[i - 1].count;
-      dailyDeltas.push({ date: rows[i].date, total: delta });
+    // Clones and views are already per-day values from GitHub — return as-is
+    const isPerDay = metric === 'clones' || metric === 'views';
+    const dailyData = [];
+    if (isPerDay) {
+      for (const row of rows) {
+        dailyData.push({ date: row.date, total: row.count });
+      }
+    } else {
+      // Stars and forks are cumulative — compute deltas
+      if (rows.length > 0) {
+        dailyData.push({ date: rows[0].date, total: rows[0].count });
+      }
+      for (let i = 1; i < rows.length; i++) {
+        const delta = rows[i].count - rows[i - 1].count;
+        dailyData.push({ date: rows[i].date, total: delta });
+      }
     }
 
-    return c.json(dailyDeltas);
+    return c.json(dailyData);
   } catch (err) {
     logger.error('Failed to compute metric daily deltas', { error: err.message });
     return c.json({ error: 'Failed to compute metric daily deltas' }, 500);
