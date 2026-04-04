@@ -38,9 +38,9 @@
     "devBackendURL": "http://localhost:8000/api",
     "pages": [
         {
-            "title": "Dashboard",
+            "title": "Downloads",
             "url": "home",
-            "icon": "layout-dashboard"
+            "icon": "download"
         }
     ],
     "stripeProducts": [],

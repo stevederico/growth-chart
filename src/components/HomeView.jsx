@@ -11,19 +11,26 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from '@stevederico/skateboard-ui/shadcn/ui/empty';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@stevederico/skateboard-ui/shadcn/ui/select';
 import { SectionCards } from './SectionCards.jsx';
 import { ChartAreaInteractive } from './ChartAreaInteractive.jsx';
 import { DailyTable } from './DataTable.jsx';
 
 /**
- * Dashboard view for Growth Chart download analytics.
+ * Downloads view for Growth Chart download analytics.
  *
  * Composes SectionCards (4 metric cards), ChartAreaInteractive (area chart
  * with time range toggle), and DataTable (per-release breakdown).
- * Fetches data from /api/downloads endpoints.
+ * Fetches data from /api/downloads endpoints with optional repo filtering.
  *
  * @component
- * @returns {JSX.Element} Dashboard view
+ * @returns {JSX.Element} Downloads view
  */
 export default function HomeView() {
   const [snapshots, setSnapshots] = useState(null);
@@ -31,13 +38,24 @@ export default function HomeView() {
   const [dailyData, setDailyData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [repos, setRepos] = useState([]);
+  const [selectedRepo, setSelectedRepo] = useState('all');
+
+  useEffect(() => {
+    apiRequest('/downloads/repos')
+      .then((data) => setRepos(data.repos || []))
+      .catch(() => {});
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       setError(null);
+      setIsLoading(true);
+      const repoParam = selectedRepo !== 'all' ? `?repo=${encodeURIComponent(selectedRepo)}` : '';
       const [allData, latest, daily] = await Promise.all([
-        apiRequest('/downloads'),
-        apiRequest('/downloads/latest'),
-        apiRequest('/downloads/daily'),
+        apiRequest(`/downloads${repoParam}`),
+        apiRequest(`/downloads/latest${repoParam}`),
+        apiRequest(`/downloads/daily${repoParam}`),
       ]);
       setSnapshots(allData);
       setLatestSnapshot(latest);
@@ -48,7 +66,7 @@ export default function HomeView() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedRepo]);
 
   useEffect(() => {
     fetchData();
@@ -108,10 +126,26 @@ export default function HomeView() {
     return { wowGrowth, downloadsToday, goalNeeded, goalDeadline };
   }, [latestSnapshot, dailyData, chartData]);
 
+  const repoSelector = repos.length > 1 && (
+    <Select value={selectedRepo} onValueChange={setSelectedRepo}>
+      <SelectTrigger className="w-[200px]">
+        <SelectValue placeholder="All Repos" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Repos</SelectItem>
+        {repos.map((repo) => (
+          <SelectItem key={repo} value={repo}>
+            {repo.split('/')[1] || repo}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
   if (isLoading) {
     return (
       <>
-        <Header title="Dashboard" />
+        <Header title="Downloads">{repoSelector}</Header>
         <div className="flex flex-1 items-center justify-center">
           <Spinner />
         </div>
@@ -122,7 +156,7 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title="Dashboard" />
+        <Header title="Downloads">{repoSelector}</Header>
         <div className="flex flex-1 items-center justify-center">
           <Empty>
             <EmptyHeader>
@@ -141,7 +175,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title="Dashboard" />
+      <Header title="Downloads">{repoSelector}</Header>
       <div className="flex flex-1 flex-col">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
