@@ -75,9 +75,10 @@ export function ChartAreaInteractive({ data = [], dailyData = [] }) {
         </CardDescription>
         <CardAction>
           <ToggleGroup
-            type="single"
-            value={mode}
-            onValueChange={(v) => v && setMode(v)}
+            value={[mode]}
+            onValueChange={(values) => {
+              if (values.length > 0) setMode(values[0])
+            }}
             variant="outline"
             className="*:data-[slot=toggle-group-item]:!px-4"
           >
