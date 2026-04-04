@@ -1,5 +1,16 @@
 ## CHANGELOG
 
+0.10.0
+
+  Add multi-repo support
+  Add repo migration
+  Add repos endpoint
+
+0.9.0
+
+  Rename Dashboard to Downloads
+  Add repo selector filter
+
 0.8.0
 
   Fix toggle group crash

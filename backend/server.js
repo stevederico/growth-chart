@@ -946,22 +946,22 @@ downloadsDb.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   )
 `);
-downloadsDb.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)
-`);
 
-// Migration: add repo column to existing databases
+// Migration: add repo column to existing databases (must run before index creation)
 try {
   downloadsDb.prepare('SELECT repo FROM downloads LIMIT 1').get();
 } catch {
   logger.info('Migrating downloads table: adding repo column');
   downloadsDb.exec(`ALTER TABLE downloads ADD COLUMN repo TEXT NOT NULL DEFAULT ''`);
   downloadsDb.exec(`DROP INDEX IF EXISTS idx_downloads_date_tag`);
-  downloadsDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)`);
   const defaultRepo = GITHUB_REPOS[0] || '';
   downloadsDb.prepare(`UPDATE downloads SET repo = ? WHERE repo = ''`).run(defaultRepo);
   logger.info('Migration complete: repo column added', { defaultRepo });
 }
+
+downloadsDb.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)
+`);
 
 /**
  * Fetch GitHub release download counts for a single repo and store a daily snapshot.
