@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.8.0
+
+  Fix toggle group crash
+
 0.7.0
 
   Fix date timezone display
