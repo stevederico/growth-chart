@@ -1,5 +1,17 @@
 ## CHANGELOG
 
+0.12.0
+
+  Store repos in SQLite
+  Add repos CRUD endpoints
+  Seed from env var
+
+0.11.0
+
+  Add Settings page
+  Add repo management
+  Add settings route
+
 0.10.0
 
   Add multi-repo support
