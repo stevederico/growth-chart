@@ -5,6 +5,8 @@
   Add GitHub metrics tracking
   Add metrics API routes
   Add metric type selector
+  Add repo from dropdown
+  Remove Settings page
   Add .env.example template
 
 0.12.0

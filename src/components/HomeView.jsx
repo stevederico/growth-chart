@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, Download, Star, GitFork, Eye, Copy, Plus } from 'lucide-react';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
 import { Button } from '@stevederico/skateboard-ui/shadcn/ui/button';
@@ -18,17 +18,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@stevederico/skateboard-ui/shadcn/ui/select';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@stevederico/skateboard-ui/shadcn/ui/dialog';
+import { Input } from '@stevederico/skateboard-ui/shadcn/ui/input';
+import { Label } from '@stevederico/skateboard-ui/shadcn/ui/label';
+import { toast } from 'sonner';
 import { SectionCards } from './SectionCards.jsx';
 import { ChartAreaInteractive } from './ChartAreaInteractive.jsx';
 import { DailyTable } from './DataTable.jsx';
 
 /** Available metric types for the selector dropdown. */
 const METRIC_TYPES = {
-  downloads: { label: 'Downloads' },
-  stars: { label: 'Stars' },
-  forks: { label: 'Forks' },
-  views: { label: 'Page Views' },
-  clones: { label: 'Clones' },
+  downloads: { label: 'Downloads', icon: Download },
+  stars: { label: 'Stars', icon: Star },
+  forks: { label: 'Forks', icon: GitFork },
+  views: { label: 'Page Views', icon: Eye },
+  clones: { label: 'Clones', icon: Copy },
 };
 
 /**
@@ -51,12 +57,40 @@ export default function HomeView() {
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState('all');
   const [selectedMetric, setSelectedMetric] = useState('downloads');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [newRepo, setNewRepo] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
 
-  useEffect(() => {
+  const fetchRepos = useCallback(() => {
     apiRequest('/downloads/repos')
       .then((data) => setRepos(data.repos || []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => { fetchRepos(); }, [fetchRepos]);
+
+  /** Add a new repo via API, refresh the list, and select it. */
+  const handleAddRepo = useCallback(async () => {
+    const trimmed = newRepo.trim();
+    if (!trimmed) return;
+    try {
+      setIsAdding(true);
+      await apiRequest('/repos', {
+        method: 'POST',
+        body: JSON.stringify({ repo: trimmed }),
+      });
+      toast.success(`Added ${trimmed}`);
+      setNewRepo('');
+      setIsAddDialogOpen(false);
+      fetchRepos();
+      setSelectedRepo(trimmed);
+    } catch (err) {
+      console.error('Failed to add repo:', err);
+      toast.error(err.message || 'Failed to add repository');
+    } finally {
+      setIsAdding(false);
+    }
+  }, [newRepo, fetchRepos]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -161,30 +195,71 @@ export default function HomeView() {
     return { wowGrowth, valueToday: downloadsToday, goalNeeded, goalDeadline };
   }, [latestSnapshot, dailyData, chartData]);
 
-  const repoSelector = repos.length > 1 && (
-    <Select value={selectedRepo} onValueChange={setSelectedRepo}>
-      <SelectTrigger className="w-[200px]">
-        <SelectValue placeholder="All Repos" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">All Repos</SelectItem>
-        {repos.map((repo) => (
-          <SelectItem key={repo} value={repo}>
-            {repo.split('/')[1] || repo}
+  const handleRepoChange = useCallback((value) => {
+    if (value === '__add__') {
+      setIsAddDialogOpen(true);
+      return;
+    }
+    setSelectedRepo(value);
+  }, []);
+
+  const repoSelector = (
+    <>
+      <Select value={selectedRepo} onValueChange={handleRepoChange}>
+        <SelectTrigger className="w-[200px]">
+          <SelectValue placeholder="All Repos" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Repos</SelectItem>
+          {repos.map((repo) => (
+            <SelectItem key={repo} value={repo}>
+              {repo.split('/')[1] || repo}
+            </SelectItem>
+          ))}
+          <SelectItem value="__add__">
+            <span className="flex items-center gap-2">
+              <Plus size={14} /> Add Repo
+            </span>
           </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        </SelectContent>
+      </Select>
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Repository</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 py-2">
+            <Label htmlFor="repo-input">GitHub Repository</Label>
+            <Input
+              id="repo-input"
+              placeholder="owner/repo"
+              value={newRepo}
+              onChange={(e) => setNewRepo(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddRepo(); }}
+            />
+          </div>
+          <DialogFooter>
+            <Button onClick={handleAddRepo} disabled={isAdding || !newRepo.trim()}>
+              {isAdding ? <><Spinner className="size-4" /> Adding...</> : 'Add'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 
   const metricSelector = (
     <Select value={selectedMetric} onValueChange={setSelectedMetric}>
-      <SelectTrigger className="w-[160px]">
+      <SelectTrigger className="w-[170px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {Object.entries(METRIC_TYPES).map(([key, { label }]) => (
-          <SelectItem key={key} value={key}>{label}</SelectItem>
+        {Object.entries(METRIC_TYPES).map(([key, { label, icon: Icon }]) => (
+          <SelectItem key={key} value={key}>
+            <span className="flex items-center gap-2">
+              <Icon size={14} /> {label}
+            </span>
+          </SelectItem>
         ))}
       </SelectContent>
     </Select>
