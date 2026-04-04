@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.15.0
+
+  Persist selected filters
+
 0.14.0
 
   Remove dead code files

@@ -54,8 +54,8 @@ export default function HomeView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [repos, setRepos] = useState([]);
-  const [selectedRepo, setSelectedRepo] = useState(null);
-  const [selectedMetric, setSelectedMetric] = useState('downloads');
+  const [selectedRepo, setSelectedRepo] = useState(() => localStorage.getItem('gc_repo') || null);
+  const [selectedMetric, setSelectedMetric] = useState(() => localStorage.getItem('gc_metric') || 'downloads');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newRepo, setNewRepo] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -68,12 +68,17 @@ export default function HomeView() {
 
   useEffect(() => { fetchRepos(); }, [fetchRepos]);
 
-  // Default to first repo once loaded
+  // Default to first repo once loaded; validate saved repo still exists
   useEffect(() => {
-    if (repos.length > 0 && !selectedRepo) {
+    if (repos.length === 0) return;
+    if (!selectedRepo || (selectedRepo !== 'all' && !repos.includes(selectedRepo))) {
       setSelectedRepo(repos[0]);
     }
   }, [repos, selectedRepo]);
+
+  // Persist selections to localStorage
+  useEffect(() => { if (selectedRepo) localStorage.setItem('gc_repo', selectedRepo); }, [selectedRepo]);
+  useEffect(() => { localStorage.setItem('gc_metric', selectedMetric); }, [selectedMetric]);
 
   /** Add a new repo via API, refresh the list, and select it. */
   const handleAddRepo = useCallback(async () => {
