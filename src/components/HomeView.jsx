@@ -157,9 +157,20 @@ export default function HomeView() {
       const current = byDate.get(s.date) || 0;
       byDate.set(s.date, current + s.count);
     }
-    return [...byDate.entries()]
+    const sorted = [...byDate.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, total]) => ({ date, total }));
+
+    // Clones/views are per-day — compute running total for cumulative chart
+    const isPerDay = selectedMetric === 'clones' || selectedMetric === 'views';
+    if (isPerDay) {
+      let cumulative = 0;
+      return sorted.map(({ date, total }) => {
+        cumulative += total;
+        return { date, total: cumulative };
+      });
+    }
+    return sorted;
   }, [snapshots, selectedMetric]);
 
   /** Derive stats from the latest snapshot and daily deltas */
