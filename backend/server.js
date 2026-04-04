@@ -926,7 +926,10 @@ app.post("/api/payment", async (c) => {
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 
 // ==== GITHUB DOWNLOAD TRACKING ====
-const GITHUB_REPO = process.env.GITHUB_REPO || '';
+const GITHUB_REPOS = (process.env.GITHUB_REPOS || process.env.GITHUB_REPO || '')
+  .split(',')
+  .map(r => r.trim())
+  .filter(Boolean);
 
 try { mkdirSync('./backend/databases', { recursive: true }); } catch {}
 const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './backend/databases/GrowthChart.db');
@@ -936,6 +939,7 @@ downloadsDb.exec('PRAGMA synchronous = NORMAL');
 downloadsDb.exec(`
   CREATE TABLE IF NOT EXISTS downloads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL,
     tag TEXT NOT NULL,
     download_count INTEGER NOT NULL,
@@ -943,36 +947,59 @@ downloadsDb.exec(`
   )
 `);
 downloadsDb.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_date_tag ON downloads(date, tag)
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)
 `);
 
+// Migration: add repo column to existing databases
+try {
+  downloadsDb.prepare('SELECT repo FROM downloads LIMIT 1').get();
+} catch {
+  logger.info('Migrating downloads table: adding repo column');
+  downloadsDb.exec(`ALTER TABLE downloads ADD COLUMN repo TEXT NOT NULL DEFAULT ''`);
+  downloadsDb.exec(`DROP INDEX IF EXISTS idx_downloads_date_tag`);
+  downloadsDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)`);
+  const defaultRepo = GITHUB_REPOS[0] || '';
+  downloadsDb.prepare(`UPDATE downloads SET repo = ? WHERE repo = ''`).run(defaultRepo);
+  logger.info('Migration complete: repo column added', { defaultRepo });
+}
+
 /**
- * Fetch GitHub release download counts and store a daily snapshot.
+ * Fetch GitHub release download counts for a single repo and store a daily snapshot.
  *
- * Calls the GitHub Releases API for the configured repo, sums asset
- * download_count per release, and upserts rows keyed on (date, tag).
+ * Calls the GitHub Releases API for the given repo, sums asset
+ * download_count per release, and upserts rows keyed on (repo, date, tag).
  * Idempotent — safe to call multiple times per day.
  *
  * @async
- * @returns {Promise<{date: string, releases: Array<{tag: string, download_count: number}>}>}
+ * @param {string} repo - GitHub repo in "owner/name" format
+ * @returns {Promise<{repo: string, date: string, releases: Array<{tag: string, download_count: number}>}>}
  */
-async function fetchDownloadSnapshot() {
-  if (!GITHUB_REPO) {
-    logger.warn('GITHUB_REPO not set, skipping snapshot');
+async function fetchDownloadSnapshot(repo) {
+  if (!repo) {
+    logger.warn('No repo provided, skipping snapshot');
     return;
   }
   const today = new Date().toISOString().split('T')[0];
 
+  // Check if we already have a snapshot for this repo today
+  const existing = downloadsDb.prepare(
+    'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
+  ).get(repo, today);
+  if (existing.count > 0) {
+    logger.debug('Snapshot already exists for today', { repo, date: today });
+    return { repo, date: today, releases: [] };
+  }
+
   try {
     const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100`,
+      `https://api.github.com/repos/${repo}/releases?per_page=100`,
       { headers: { 'User-Agent': 'GrowthChart-Bot/1.0', 'Accept': 'application/vnd.github+json' } }
     );
 
     if (!response.ok) {
       const status = response.status;
       const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-      logger.warn('GitHub API request failed', { status, rateLimitRemaining });
+      logger.warn('GitHub API request failed', { repo, status, rateLimitRemaining });
       throw new Error(`GitHub API returned ${status}`);
     }
 
@@ -983,7 +1010,7 @@ async function fetchDownloadSnapshot() {
 
     const releases = await response.json();
     const insertStmt = downloadsDb.prepare(
-      `INSERT OR REPLACE INTO downloads (date, tag, download_count) VALUES (?, ?, ?)`
+      `INSERT OR REPLACE INTO downloads (repo, date, tag, download_count) VALUES (?, ?, ?, ?)`
     );
 
     const results = [];
@@ -992,39 +1019,77 @@ async function fetchDownloadSnapshot() {
       const downloadCount = (release.assets || []).reduce(
         (sum, asset) => sum + (asset.download_count || 0), 0
       );
-      insertStmt.run(today, tag, downloadCount);
+      insertStmt.run(repo, today, tag, downloadCount);
       results.push({ tag, download_count: downloadCount });
     }
 
-    logger.info('Download snapshot saved', { date: today, releaseCount: results.length });
-    return { date: today, releases: results };
+    logger.info('Download snapshot saved', { repo, date: today, releaseCount: results.length });
+    return { repo, date: today, releases: results };
   } catch (err) {
-    logger.error('Failed to fetch download snapshot', { error: err.message });
+    logger.error('Failed to fetch download snapshot', { repo, error: err.message });
     throw err;
   }
 }
 
 /**
+ * Fetch download snapshots for all configured repos.
+ *
+ * Iterates through GITHUB_REPOS and calls fetchDownloadSnapshot for each.
+ * Errors for individual repos are logged but do not stop processing.
+ *
+ * @async
+ * @returns {Promise<void>}
+ */
+async function fetchAllSnapshots() {
+  if (GITHUB_REPOS.length === 0) {
+    logger.warn('GITHUB_REPOS not set, skipping snapshot');
+    return;
+  }
+  for (const repo of GITHUB_REPOS) {
+    try {
+      await fetchDownloadSnapshot(repo);
+    } catch (err) {
+      logger.error('Snapshot failed for repo', { repo, error: err.message });
+    }
+  }
+}
+
+/**
+ * GET /api/downloads/repos — Return the list of configured repos.
+ */
+app.get('/api/downloads/repos', (c) => {
+  return c.json({ repos: GITHUB_REPOS });
+});
+
+/**
  * GET /api/downloads — Return all download snapshots.
- * Optional query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Optional query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD&repo=owner/name
  */
 app.get('/api/downloads', (c) => {
   try {
     const from = c.req.query('from');
     const to = c.req.query('to');
+    const repo = c.req.query('repo');
 
-    let sql = 'SELECT date, tag, download_count FROM downloads';
+    let sql = 'SELECT repo, date, tag, download_count FROM downloads';
+    const conditions = [];
     const params = [];
 
-    if (from && to) {
-      sql += ' WHERE date >= ? AND date <= ?';
-      params.push(from, to);
-    } else if (from) {
-      sql += ' WHERE date >= ?';
+    if (repo) {
+      conditions.push('repo = ?');
+      params.push(repo);
+    }
+    if (from) {
+      conditions.push('date >= ?');
       params.push(from);
-    } else if (to) {
-      sql += ' WHERE date <= ?';
+    }
+    if (to) {
+      conditions.push('date <= ?');
       params.push(to);
+    }
+
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
     }
 
     sql += ' ORDER BY date DESC, tag ASC';
@@ -1040,12 +1105,21 @@ app.get('/api/downloads', (c) => {
 /**
  * GET /api/downloads/daily — Return daily download deltas.
  * Computes the difference in cumulative downloads between consecutive days.
+ * Optional query param: ?repo=owner/name
  */
 app.get('/api/downloads/daily', (c) => {
   try {
-    const rows = downloadsDb.prepare(
-      'SELECT date, tag, download_count FROM downloads ORDER BY date ASC, tag ASC'
-    ).all();
+    const repo = c.req.query('repo');
+    let sql = 'SELECT repo, date, tag, download_count FROM downloads';
+    const params = [];
+
+    if (repo) {
+      sql += ' WHERE repo = ?';
+      params.push(repo);
+    }
+
+    sql += ' ORDER BY date ASC, tag ASC';
+    const rows = downloadsDb.prepare(sql).all(...params);
 
     // Group by date
     const byDate = new Map();
@@ -1088,20 +1162,36 @@ app.get('/api/downloads/daily', (c) => {
 /**
  * GET /api/downloads/latest — Return the most recent snapshot
  * with a total across all releases.
+ * Optional query param: ?repo=owner/name
  */
 app.get('/api/downloads/latest', (c) => {
   try {
-    const latestDate = downloadsDb.prepare(
-      'SELECT date FROM downloads ORDER BY date DESC LIMIT 1'
-    ).get();
+    const repo = c.req.query('repo');
+    let dateSql = 'SELECT date FROM downloads';
+    const dateParams = [];
+
+    if (repo) {
+      dateSql += ' WHERE repo = ?';
+      dateParams.push(repo);
+    }
+
+    dateSql += ' ORDER BY date DESC LIMIT 1';
+    const latestDate = downloadsDb.prepare(dateSql).get(...dateParams);
 
     if (!latestDate) {
       return c.json({ date: null, total: 0, releases: [] });
     }
 
-    const rows = downloadsDb.prepare(
-      'SELECT tag, download_count FROM downloads WHERE date = ? ORDER BY tag ASC'
-    ).all(latestDate.date);
+    let rowsSql = 'SELECT tag, download_count FROM downloads WHERE date = ?';
+    const rowsParams = [latestDate.date];
+
+    if (repo) {
+      rowsSql += ' AND repo = ?';
+      rowsParams.push(repo);
+    }
+
+    rowsSql += ' ORDER BY tag ASC';
+    const rows = downloadsDb.prepare(rowsSql).all(...rowsParams);
 
     const total = rows.reduce((sum, r) => sum + r.download_count, 0);
 
@@ -1118,11 +1208,26 @@ app.get('/api/downloads/latest', (c) => {
 
 /**
  * POST /api/downloads/snapshot — Manually trigger a download snapshot.
+ * Optional body: { repo: "owner/name" } to snapshot a single repo.
+ * If omitted, snapshots all configured repos.
  */
 app.post('/api/downloads/snapshot', async (c) => {
   try {
-    const result = await fetchDownloadSnapshot();
-    return c.json(result, 201);
+    let repo;
+    try {
+      const body = await c.req.json();
+      repo = body?.repo;
+    } catch {
+      // No body or invalid JSON — snapshot all repos
+    }
+
+    if (repo) {
+      const result = await fetchDownloadSnapshot(repo);
+      return c.json(result, 201);
+    }
+
+    await fetchAllSnapshots();
+    return c.json({ message: 'Snapshots completed for all repos', repos: GITHUB_REPOS }, 201);
   } catch (err) {
     return c.json({ error: 'Failed to fetch snapshot: ' + err.message }, 500);
   }
@@ -1134,30 +1239,32 @@ app.post('/api/downloads/snapshot', async (c) => {
  *
  * @body {string} date - YYYY-MM-DD date to backfill
  * @body {number} total - Total download count for that date
+ * @body {string} [repo] - GitHub repo in "owner/name" format (defaults to first configured repo)
  */
 app.post('/api/downloads/backfill', async (c) => {
   try {
     const body = await c.req.json();
     const { date, total } = body;
+    const repo = body.repo || GITHUB_REPOS[0] || '';
     if (!date || total == null) {
       return c.json({ error: 'date and total are required' }, 400);
     }
 
     const nearest = downloadsDb.prepare(
-      'SELECT DISTINCT date FROM downloads ORDER BY ABS(julianday(date) - julianday(?)) LIMIT 1'
-    ).get(date);
+      'SELECT DISTINCT date FROM downloads WHERE repo = ? ORDER BY ABS(julianday(date) - julianday(?)) LIMIT 1'
+    ).get(repo, date);
 
     if (!nearest) {
       return c.json({ error: 'No existing snapshots to base distribution on' }, 400);
     }
 
     const refRows = downloadsDb.prepare(
-      'SELECT tag, download_count FROM downloads WHERE date = ?'
-    ).all(nearest.date);
+      'SELECT tag, download_count FROM downloads WHERE repo = ? AND date = ?'
+    ).all(repo, nearest.date);
 
     const refTotal = refRows.reduce((s, r) => s + r.download_count, 0);
     const insertStmt = downloadsDb.prepare(
-      'INSERT OR REPLACE INTO downloads (date, tag, download_count) VALUES (?, ?, ?)'
+      'INSERT OR REPLACE INTO downloads (repo, date, tag, download_count) VALUES (?, ?, ?, ?)'
     );
 
     const results = [];
@@ -1168,12 +1275,12 @@ app.post('/api/downloads/backfill', async (c) => {
         ? total - assigned
         : Math.round((refRows[i].download_count / refTotal) * total);
       assigned += count;
-      insertStmt.run(date, tag, Math.max(0, count));
+      insertStmt.run(repo, date, tag, Math.max(0, count));
       results.push({ tag, download_count: Math.max(0, count) });
     }
 
-    logger.info('Backfill saved', { date, total, releaseCount: results.length });
-    return c.json({ date, total, releases: results }, 201);
+    logger.info('Backfill saved', { repo, date, total, releaseCount: results.length });
+    return c.json({ repo, date, total, releases: results }, 201);
   } catch (err) {
     logger.error('Backfill failed', { error: err.message });
     return c.json({ error: 'Backfill failed: ' + err.message }, 500);
@@ -1716,20 +1823,26 @@ function loadEnvFile(filePath) {
 
 // ==== DOWNLOAD SNAPSHOT ====
 // Run once on startup
-fetchDownloadSnapshot().catch(() => {});
+fetchAllSnapshots().catch(() => {});
 
-// Hourly check: if today's snapshot is missing, take one.
+// Hourly check: if today's snapshot is missing for any repo, take one.
 // Handles the case where the server stays running across midnight
 // and Railway cron doesn't trigger a restart.
 setInterval(async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    const row = downloadsDb.prepare(
-      'SELECT COUNT(*) as count FROM downloads WHERE date = ?'
-    ).get(today);
-    if (row.count === 0) {
-      logger.info('No snapshot for today, triggering fetch', { date: today });
-      await fetchDownloadSnapshot();
+    for (const repo of GITHUB_REPOS) {
+      const row = downloadsDb.prepare(
+        'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
+      ).get(repo, today);
+      if (row.count === 0) {
+        logger.info('No snapshot for today, triggering fetch', { repo, date: today });
+        try {
+          await fetchDownloadSnapshot(repo);
+        } catch (err) {
+          logger.error('Hourly snapshot failed for repo', { repo, error: err.message });
+        }
+      }
     }
   } catch (err) {
     logger.error('Hourly snapshot check failed', { error: err.message });
