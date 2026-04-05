@@ -306,7 +306,7 @@ export default function HomeView() {
   if (isLoading) {
     return (
       <>
-        <Header title={"Dashboard"}>
+        <Header title={<span className="hidden sm:inline">Dashboard</span>}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -320,7 +320,7 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title={"Dashboard"}>
+        <Header title={<span className="hidden sm:inline">Dashboard</span>}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -342,7 +342,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title={"Dashboard"}>
+      <Header title={<span className="hidden sm:inline">Dashboard</span>}>
         {metricSelector}
         {repoSelector}
       </Header>

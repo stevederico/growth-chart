@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.25.0
+
+  Hide dashboard title on mobile
+
 0.24.0
 
   Add daily/total toggle overview
