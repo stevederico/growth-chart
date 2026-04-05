@@ -62,7 +62,7 @@ export default function HomeView() {
 
   const fetchRepos = useCallback(() => {
     apiRequest('/downloads/repos')
-      .then((data) => setRepos(data.repos || []))
+      .then((data) => setRepos((data.repos || []).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))))
       .catch(() => {});
   }, []);
 

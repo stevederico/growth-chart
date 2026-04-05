@@ -1,5 +1,10 @@
 ## CHANGELOG
 
+0.18.0
+
+  Add overview table
+  Sort repo dropdown
+
 0.17.0
 
   Skip landing page

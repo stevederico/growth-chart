@@ -1731,6 +1731,30 @@ app.get('/api/metrics/latest', (c) => {
 });
 
 /**
+ * GET /api/metrics/overview — Per-repo totals for clones and views.
+ * Returns [{repo, clones, uniqueClones, views, uniqueViews}] sorted by clones desc.
+ */
+app.get('/api/metrics/overview', (c) => {
+  try {
+    const rows = downloadsDb.prepare(`
+      SELECT repo,
+        SUM(CASE WHEN metric = 'clones' THEN count ELSE 0 END) AS clones,
+        SUM(CASE WHEN metric = 'clones' THEN uniques ELSE 0 END) AS uniqueClones,
+        SUM(CASE WHEN metric = 'views' THEN count ELSE 0 END) AS views,
+        SUM(CASE WHEN metric = 'views' THEN uniques ELSE 0 END) AS uniqueViews
+      FROM github_metrics
+      WHERE metric IN ('clones', 'views')
+      GROUP BY repo
+      ORDER BY clones DESC
+    `).all();
+    return c.json(rows);
+  } catch (err) {
+    logger.error('Failed to fetch metrics overview', { error: err.message });
+    return c.json({ error: 'Failed to fetch metrics overview' }, 500);
+  }
+});
+
+/**
  * POST /api/metrics/snapshot — Manually trigger metric snapshot.
  * Optional body: {metric, repo}. If omitted, fetches all metrics for all repos.
  */

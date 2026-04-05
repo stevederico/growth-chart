@@ -15,6 +15,7 @@ import Layout from '@stevederico/skateboard-ui/Layout';
 import CommandMenu from './components/CommandMenu.jsx';
 import constants from './constants.json';
 const HomeView = lazy(() => import('./components/HomeView.jsx'));
+const OverviewView = lazy(() => import('./components/OverviewView.jsx'));
 import SettingsView from './components/SettingsView.jsx';
 
 /**
@@ -42,6 +43,14 @@ const appRoutes = [
     element: (
       <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Spinner /></div>}>
         <HomeView />
+      </Suspense>
+    ),
+  },
+  {
+    path: 'overview',
+    element: (
+      <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Spinner /></div>}>
+        <OverviewView />
       </Suspense>
     ),
   },
