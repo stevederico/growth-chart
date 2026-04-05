@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.22.0
+
+  Rename Unique to Unique Cloners
+
 0.21.0
 
   Link repo to dashboard

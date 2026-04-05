@@ -27,7 +27,7 @@ const COLUMNS = [
   { key: 'stars', label: 'Stars', align: 'right' },
   { key: 'forks', label: 'Forks', align: 'right' },
   { key: 'clones', label: 'Clones', align: 'right' },
-  { key: 'uniqueClones', label: 'Unique', align: 'right' },
+  { key: 'uniqueClones', label: 'Unique Cloners', align: 'right' },
   { key: 'views', label: 'Views', align: 'right' },
   { key: 'uniqueViews', label: 'Unique Views', align: 'right' },
 ];
