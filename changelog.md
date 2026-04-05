@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.19.0
+
+  Add sortable column headers
+
 0.18.0
 
   Add overview table

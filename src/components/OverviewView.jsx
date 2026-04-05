@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { CircleAlert } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { CircleAlert, ArrowUp, ArrowDown } from 'lucide-react';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
 import { Spinner } from '@stevederico/skateboard-ui/shadcn/ui/spinner';
@@ -19,8 +19,18 @@ function fmt(num) {
   return new Intl.NumberFormat().format(num ?? 0);
 }
 
+/** Sortable columns and their data keys. */
+const COLUMNS = [
+  { key: 'repo', label: 'Repo', align: 'left' },
+  { key: 'clones', label: 'Clones', align: 'right' },
+  { key: 'uniqueClones', label: 'Unique', align: 'right' },
+  { key: 'views', label: 'Views', align: 'right' },
+  { key: 'uniqueViews', label: 'Unique Views', align: 'right' },
+];
+
 /**
  * Overview table showing per-repo clone and view totals.
+ * Column headers are clickable to sort ascending/descending.
  *
  * @component
  * @returns {JSX.Element}
@@ -29,6 +39,8 @@ export default function OverviewView() {
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortKey, setSortKey] = useState('clones');
+  const [sortDir, setSortDir] = useState('desc');
 
   const fetchData = () => {
     setIsLoading(true);
@@ -43,6 +55,35 @@ export default function OverviewView() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'repo' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortedData = useMemo(() => {
+    if (!data) return [];
+    return [...data].sort((a, b) => {
+      const aVal = a[sortKey];
+      const bVal = b[sortKey];
+      if (sortKey === 'repo') {
+        const cmp = (aVal || '').localeCompare(bVal || '', undefined, { sensitivity: 'base' });
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      return sortDir === 'asc' ? (aVal || 0) - (bVal || 0) : (bVal || 0) - (aVal || 0);
+    });
+  }, [data, sortKey, sortDir]);
+
+  const totals = useMemo(() => (data || []).reduce((acc, row) => ({
+    clones: acc.clones + (row.clones || 0),
+    uniqueClones: acc.uniqueClones + (row.uniqueClones || 0),
+    views: acc.views + (row.views || 0),
+    uniqueViews: acc.uniqueViews + (row.uniqueViews || 0),
+  }), { clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 }), [data]);
 
   if (isLoading) {
     return (
@@ -71,12 +112,7 @@ export default function OverviewView() {
     );
   }
 
-  const totals = (data || []).reduce((acc, row) => ({
-    clones: acc.clones + (row.clones || 0),
-    uniqueClones: acc.uniqueClones + (row.uniqueClones || 0),
-    views: acc.views + (row.views || 0),
-    uniqueViews: acc.uniqueViews + (row.uniqueViews || 0),
-  }), { clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 });
+  const SortIcon = sortDir === 'asc' ? ArrowUp : ArrowDown;
 
   return (
     <>
@@ -91,15 +127,23 @@ export default function OverviewView() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Repo</TableHead>
-                  <TableHead className="text-right">Clones</TableHead>
-                  <TableHead className="text-right">Unique</TableHead>
-                  <TableHead className="text-right">Views</TableHead>
-                  <TableHead className="text-right">Unique Views</TableHead>
+                  {COLUMNS.map(({ key, label, align }) => (
+                    <TableHead
+                      key={key}
+                      className={`${align === 'right' ? 'text-right' : ''} cursor-pointer select-none`}
+                      onClick={() => handleSort(key)}
+                      aria-label={`Sort by ${label}`}
+                    >
+                      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'justify-end' : ''}`}>
+                        {label}
+                        {sortKey === key && <SortIcon size={14} />}
+                      </span>
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(data || []).map((row) => (
+                {sortedData.map((row) => (
                   <TableRow key={row.repo}>
                     <TableCell className="font-medium">{row.repo.split('/')[1] || row.repo}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.clones)}</TableCell>
