@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.20.0
+
+  Add all metrics to overview
+
 0.19.0
 
   Add sortable column headers

@@ -22,6 +22,9 @@ function fmt(num) {
 /** Sortable columns and their data keys. */
 const COLUMNS = [
   { key: 'repo', label: 'Repo', align: 'left' },
+  { key: 'downloads', label: 'Downloads', align: 'right' },
+  { key: 'stars', label: 'Stars', align: 'right' },
+  { key: 'forks', label: 'Forks', align: 'right' },
   { key: 'clones', label: 'Clones', align: 'right' },
   { key: 'uniqueClones', label: 'Unique', align: 'right' },
   { key: 'views', label: 'Views', align: 'right' },
@@ -79,11 +82,14 @@ export default function OverviewView() {
   }, [data, sortKey, sortDir]);
 
   const totals = useMemo(() => (data || []).reduce((acc, row) => ({
+    downloads: acc.downloads + (row.downloads || 0),
+    stars: acc.stars + (row.stars || 0),
+    forks: acc.forks + (row.forks || 0),
     clones: acc.clones + (row.clones || 0),
     uniqueClones: acc.uniqueClones + (row.uniqueClones || 0),
     views: acc.views + (row.views || 0),
     uniqueViews: acc.uniqueViews + (row.uniqueViews || 0),
-  }), { clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 }), [data]);
+  }), { downloads: 0, stars: 0, forks: 0, clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 }), [data]);
 
   if (isLoading) {
     return (
@@ -146,6 +152,9 @@ export default function OverviewView() {
                 {sortedData.map((row) => (
                   <TableRow key={row.repo}>
                     <TableCell className="font-medium">{row.repo.split('/')[1] || row.repo}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(row.downloads)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(row.stars)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(row.forks)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.clones)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.uniqueClones)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.views)}</TableCell>
@@ -154,6 +163,9 @@ export default function OverviewView() {
                 ))}
                 <TableRow className="font-semibold border-t-2">
                   <TableCell>Total</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(totals.downloads)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(totals.stars)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(totals.forks)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(totals.clones)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(totals.uniqueClones)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(totals.views)}</TableCell>

@@ -1731,12 +1731,14 @@ app.get('/api/metrics/latest', (c) => {
 });
 
 /**
- * GET /api/metrics/overview — Per-repo totals for clones and views.
- * Returns [{repo, clones, uniqueClones, views, uniqueViews}] sorted by clones desc.
+ * GET /api/metrics/overview — Per-repo totals for all metrics.
+ * Clones/views are summed (per-day values). Stars/forks use latest snapshot (cumulative).
+ * Downloads come from the downloads table.
+ * Returns [{repo, downloads, stars, forks, clones, uniqueClones, views, uniqueViews}].
  */
 app.get('/api/metrics/overview', (c) => {
   try {
-    const rows = downloadsDb.prepare(`
+    const trafficRows = downloadsDb.prepare(`
       SELECT repo,
         SUM(CASE WHEN metric = 'clones' THEN count ELSE 0 END) AS clones,
         SUM(CASE WHEN metric = 'clones' THEN uniques ELSE 0 END) AS uniqueClones,
@@ -1745,9 +1747,50 @@ app.get('/api/metrics/overview', (c) => {
       FROM github_metrics
       WHERE metric IN ('clones', 'views')
       GROUP BY repo
-      ORDER BY clones DESC
     `).all();
-    return c.json(rows);
+
+    const latestRows = downloadsDb.prepare(`
+      SELECT repo, metric, count FROM github_metrics
+      WHERE (repo, metric, date) IN (
+        SELECT repo, metric, MAX(date) FROM github_metrics
+        WHERE metric IN ('stars', 'forks')
+        GROUP BY repo, metric
+      )
+    `).all();
+
+    const downloadRows = downloadsDb.prepare(`
+      SELECT repo, SUM(download_count) AS downloads
+      FROM downloads
+      WHERE repo != ''
+      GROUP BY repo
+    `).all();
+
+    const repoMap = new Map();
+    const ensure = (repo) => {
+      if (!repoMap.has(repo)) {
+        repoMap.set(repo, { repo, downloads: 0, stars: 0, forks: 0, clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 });
+      }
+      return repoMap.get(repo);
+    };
+
+    for (const row of trafficRows) {
+      const r = ensure(row.repo);
+      r.clones = row.clones;
+      r.uniqueClones = row.uniqueClones;
+      r.views = row.views;
+      r.uniqueViews = row.uniqueViews;
+    }
+    for (const row of latestRows) {
+      const r = ensure(row.repo);
+      r[row.metric] = row.count;
+    }
+    for (const row of downloadRows) {
+      const r = ensure(row.repo);
+      r.downloads = row.downloads;
+    }
+
+    const result = [...repoMap.values()].sort((a, b) => b.clones - a.clones);
+    return c.json(result);
   } catch (err) {
     logger.error('Failed to fetch metrics overview', { error: err.message });
     return c.json({ error: 'Failed to fetch metrics overview' }, 500);
