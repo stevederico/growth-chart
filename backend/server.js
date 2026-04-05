@@ -1775,21 +1775,40 @@ app.get('/api/metrics/overview', (c) => {
       )
     `).all();
 
+    // Downloads are cumulative per tag — compute deltas for daily, latest per-tag sums for total
     let downloadRows;
     if (isDaily) {
-      downloadRows = downloadsDb.prepare(`
-        SELECT d.repo, SUM(d.download_count) AS downloads
-        FROM downloads d
-        INNER JOIN (SELECT MAX(date) AS max_date FROM downloads WHERE repo != '') md
-          ON d.date = md.max_date
-        WHERE d.repo != ''
-        GROUP BY d.repo
-      `).all();
+      // Get the two most recent dates
+      const dates = downloadsDb.prepare(
+        `SELECT DISTINCT date FROM downloads WHERE repo != '' ORDER BY date DESC LIMIT 2`
+      ).all().map(r => r.date);
+      if (dates.length >= 2) {
+        const latestDate = dates[0];
+        const prevDate = dates[1];
+        const latestSums = downloadsDb.prepare(
+          `SELECT repo, SUM(download_count) AS total FROM downloads WHERE date = ? AND repo != '' GROUP BY repo`
+        ).all(latestDate);
+        const prevSums = downloadsDb.prepare(
+          `SELECT repo, SUM(download_count) AS total FROM downloads WHERE date = ? AND repo != '' GROUP BY repo`
+        ).all(prevDate);
+        const prevMap = new Map(prevSums.map(r => [r.repo, r.total]));
+        downloadRows = latestSums.map(r => ({
+          repo: r.repo,
+          downloads: r.total - (prevMap.get(r.repo) || 0),
+        }));
+      } else {
+        downloadRows = [];
+      }
     } else {
+      // Total: latest download_count per tag, summed per repo
       downloadRows = downloadsDb.prepare(`
+        WITH latest AS (
+          SELECT repo, tag, download_count,
+            ROW_NUMBER() OVER (PARTITION BY repo, tag ORDER BY date DESC) AS rn
+          FROM downloads WHERE repo != ''
+        )
         SELECT repo, SUM(download_count) AS downloads
-        FROM downloads
-        WHERE repo != ''
+        FROM latest WHERE rn = 1
         GROUP BY repo
       `).all();
     }

@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.27.0
+
+  Fix overview download calculations
+
 0.26.0
 
   Fix mobile dropdown sizing
