@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.17.0
+
+  Skip landing page
+
 0.16.0
 
   Fix chart clipping issues
