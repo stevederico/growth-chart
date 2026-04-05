@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CircleAlert, ArrowUp, ArrowDown } from 'lucide-react';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
@@ -44,6 +45,7 @@ export default function OverviewView() {
   const [error, setError] = useState(null);
   const [sortKey, setSortKey] = useState('clones');
   const [sortDir, setSortDir] = useState('desc');
+  const navigate = useNavigate();
 
   const fetchData = () => {
     setIsLoading(true);
@@ -151,7 +153,13 @@ export default function OverviewView() {
               <TableBody>
                 {sortedData.map((row) => (
                   <TableRow key={row.repo}>
-                    <TableCell className="font-medium">{row.repo.split('/')[1] || row.repo}</TableCell>
+                    <TableCell
+                      className="font-medium cursor-pointer hover:underline"
+                      onClick={() => {
+                        localStorage.setItem('gc_repo', row.repo);
+                        navigate('/app/home');
+                      }}
+                    >{row.repo.split('/')[1] || row.repo}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.downloads)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.stars)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(row.forks)}</TableCell>

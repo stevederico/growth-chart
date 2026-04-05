@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.21.0
+
+  Link repo to dashboard
+
 0.20.0
 
   Add all metrics to overview
