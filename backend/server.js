@@ -1732,22 +1732,39 @@ app.get('/api/metrics/latest', (c) => {
 
 /**
  * GET /api/metrics/overview — Per-repo totals for all metrics.
- * Clones/views are summed (per-day values). Stars/forks use latest snapshot (cumulative).
- * Downloads come from the downloads table.
+ * Optional query param: period=daily (most recent day only) or total (default, all-time).
  * Returns [{repo, downloads, stars, forks, clones, uniqueClones, views, uniqueViews}].
  */
 app.get('/api/metrics/overview', (c) => {
   try {
-    const trafficRows = downloadsDb.prepare(`
-      SELECT repo,
-        SUM(CASE WHEN metric = 'clones' THEN count ELSE 0 END) AS clones,
-        SUM(CASE WHEN metric = 'clones' THEN uniques ELSE 0 END) AS uniqueClones,
-        SUM(CASE WHEN metric = 'views' THEN count ELSE 0 END) AS views,
-        SUM(CASE WHEN metric = 'views' THEN uniques ELSE 0 END) AS uniqueViews
-      FROM github_metrics
-      WHERE metric IN ('clones', 'views')
-      GROUP BY repo
-    `).all();
+    const isDaily = c.req.query('period') === 'daily';
+
+    let trafficRows;
+    if (isDaily) {
+      trafficRows = downloadsDb.prepare(`
+        SELECT m.repo,
+          SUM(CASE WHEN m.metric = 'clones' THEN m.count ELSE 0 END) AS clones,
+          SUM(CASE WHEN m.metric = 'clones' THEN m.uniques ELSE 0 END) AS uniqueClones,
+          SUM(CASE WHEN m.metric = 'views' THEN m.count ELSE 0 END) AS views,
+          SUM(CASE WHEN m.metric = 'views' THEN m.uniques ELSE 0 END) AS uniqueViews
+        FROM github_metrics m
+        INNER JOIN (SELECT MAX(date) AS max_date FROM github_metrics WHERE metric IN ('clones', 'views')) d
+          ON m.date = d.max_date
+        WHERE m.metric IN ('clones', 'views')
+        GROUP BY m.repo
+      `).all();
+    } else {
+      trafficRows = downloadsDb.prepare(`
+        SELECT repo,
+          SUM(CASE WHEN metric = 'clones' THEN count ELSE 0 END) AS clones,
+          SUM(CASE WHEN metric = 'clones' THEN uniques ELSE 0 END) AS uniqueClones,
+          SUM(CASE WHEN metric = 'views' THEN count ELSE 0 END) AS views,
+          SUM(CASE WHEN metric = 'views' THEN uniques ELSE 0 END) AS uniqueViews
+        FROM github_metrics
+        WHERE metric IN ('clones', 'views')
+        GROUP BY repo
+      `).all();
+    }
 
     const latestRows = downloadsDb.prepare(`
       SELECT repo, metric, count FROM github_metrics
@@ -1758,12 +1775,24 @@ app.get('/api/metrics/overview', (c) => {
       )
     `).all();
 
-    const downloadRows = downloadsDb.prepare(`
-      SELECT repo, SUM(download_count) AS downloads
-      FROM downloads
-      WHERE repo != ''
-      GROUP BY repo
-    `).all();
+    let downloadRows;
+    if (isDaily) {
+      downloadRows = downloadsDb.prepare(`
+        SELECT d.repo, SUM(d.download_count) AS downloads
+        FROM downloads d
+        INNER JOIN (SELECT MAX(date) AS max_date FROM downloads WHERE repo != '') md
+          ON d.date = md.max_date
+        WHERE d.repo != ''
+        GROUP BY d.repo
+      `).all();
+    } else {
+      downloadRows = downloadsDb.prepare(`
+        SELECT repo, SUM(download_count) AS downloads
+        FROM downloads
+        WHERE repo != ''
+        GROUP BY repo
+      `).all();
+    }
 
     const repoMap = new Map();
     const ensure = (repo) => {

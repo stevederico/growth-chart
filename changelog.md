@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.24.0
+
+  Add daily/total toggle overview
+
 0.23.0
 
   Fix overview column spacing

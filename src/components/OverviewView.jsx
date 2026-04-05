@@ -14,6 +14,9 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@stevederico/skateboard-ui/shadcn/ui/table';
+import {
+  ToggleGroup, ToggleGroupItem,
+} from '@stevederico/skateboard-ui/shadcn/ui/toggle-group';
 
 /** Format a number with locale-aware grouping. */
 function fmt(num) {
@@ -45,12 +48,14 @@ export default function OverviewView() {
   const [error, setError] = useState(null);
   const [sortKey, setSortKey] = useState('clones');
   const [sortDir, setSortDir] = useState('desc');
+  const [mode, setMode] = useState('total');
   const navigate = useNavigate();
 
-  const fetchData = () => {
+  const fetchData = (period) => {
     setIsLoading(true);
     setError(null);
-    apiRequest('/metrics/overview')
+    const param = period === 'daily' ? '?period=daily' : '';
+    apiRequest(`/metrics/overview${param}`)
       .then((rows) => setData(rows))
       .catch((err) => {
         console.error('Failed to fetch overview:', err);
@@ -59,7 +64,7 @@ export default function OverviewView() {
       .finally(() => setIsLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(mode); }, [mode]);
 
   const handleSort = (key) => {
     if (sortKey === key) {
@@ -128,8 +133,23 @@ export default function OverviewView() {
       <div className="flex flex-1 flex-col gap-4 p-4 lg:px-6">
         <Card>
           <CardHeader>
-            <CardTitle>All Repositories</CardTitle>
-            <CardDescription>Clone and view totals across all tracked repos</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>All Repositories</CardTitle>
+                <CardDescription>
+                  {mode === 'daily' ? 'Most recent day across all tracked repos' : 'All-time totals across all tracked repos'}
+                </CardDescription>
+              </div>
+              <ToggleGroup
+                value={[mode]}
+                onValueChange={(values) => { if (values.length > 0) setMode(values[0]); }}
+                variant="outline"
+                className="*:data-[slot=toggle-group-item]:!px-4"
+              >
+                <ToggleGroupItem value="daily">Daily</ToggleGroupItem>
+                <ToggleGroupItem value="total">Total</ToggleGroupItem>
+              </ToggleGroup>
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
