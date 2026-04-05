@@ -128,12 +128,14 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
                   axisLine={false}
                   tickMargin={8}
                   width={40}
+                  domain={[0, 'auto']}
+                  allowDataOverflow={false}
                   className="fill-muted-foreground text-xs"
                 />
                 <Tooltip content={(props) => <CustomTooltip {...props} metricType={metricType} />} cursor={false} />
                 <Area
                   dataKey="total"
-                  type="natural"
+                  type="monotone"
                   fill="url(#fillChart)"
                   stroke="var(--primary)"
                   strokeWidth={2}

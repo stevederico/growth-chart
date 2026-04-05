@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.16.0
+
+  Fix chart clipping issues
+
 0.15.0
 
   Persist selected filters
