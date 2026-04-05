@@ -234,12 +234,12 @@ export default function HomeView() {
   const repoSelector = (
     <>
       <Select value={selectedRepo || ''} onValueChange={handleRepoChange}>
-        <SelectTrigger className="w-auto">
-          <span className="flex items-center gap-2">
-            <Github size={14} />
-            {selectedRepo && selectedRepo !== 'all'
+        <SelectTrigger className="w-auto max-w-[180px] sm:max-w-none">
+          <span className="flex items-center gap-2 min-w-0">
+            <Github size={14} className="shrink-0" />
+            <span className="truncate">{selectedRepo && selectedRepo !== 'all'
               ? selectedRepo.split('/')[1] || selectedRepo
-              : 'All Repos'}
+              : 'All Repos'}</span>
           </span>
         </SelectTrigger>
         <SelectContent>
@@ -285,10 +285,10 @@ export default function HomeView() {
 
   const metricSelector = (
     <Select value={selectedMetric} onValueChange={setSelectedMetric}>
-      <SelectTrigger className="w-[170px]">
+      <SelectTrigger className="w-auto">
         <span className="flex items-center gap-2">
           {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
-          {METRIC_TYPES[selectedMetric]?.label || 'Downloads'}
+          <span className="truncate">{METRIC_TYPES[selectedMetric]?.label || 'Downloads'}</span>
         </span>
       </SelectTrigger>
       <SelectContent>

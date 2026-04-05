@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.26.0
+
+  Fix mobile dropdown sizing
+
 0.25.0
 
   Hide dashboard title on mobile
