@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.23.0
+
+  Fix overview column spacing
+
 0.22.0
 
   Rename Unique to Unique Cloners

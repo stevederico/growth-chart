@@ -138,7 +138,7 @@ export default function OverviewView() {
                   {COLUMNS.map(({ key, label, align }) => (
                     <TableHead
                       key={key}
-                      className={`${align === 'right' ? 'text-right' : ''} cursor-pointer select-none`}
+                      className={`${align === 'right' ? 'text-right w-[1%] whitespace-nowrap' : ''} cursor-pointer select-none`}
                       onClick={() => handleSort(key)}
                       aria-label={`Sort by ${label}`}
                     >
