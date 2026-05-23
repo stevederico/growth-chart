@@ -1,5 +1,11 @@
 ## CHANGELOG
 
+0.28.0
+
+  Bump skateboard 3.4.0
+  Migrate to react-router
+  Migrate to vendored icons
+
 0.27.0
 
   Fix overview download calculations
