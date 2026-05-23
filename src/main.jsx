@@ -8,7 +8,7 @@
  */
 import './assets/styles.css';
 import { lazy, Suspense } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import { createSkateboardApp } from '@stevederico/skateboard-ui/App';
 import { Spinner } from '@stevederico/skateboard-ui/shadcn/ui/spinner';
 import Layout from '@stevederico/skateboard-ui/Layout';

@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp, Minus, Target } from "lucide-react"
+import { TrendingDown, TrendingUp, Minus, Target } from "@stevederico/skateboard-ui/icons"
 
 import { Badge } from "@stevederico/skateboard-ui/shadcn/ui/badge"
 import {

@@ -9,7 +9,7 @@
  */
 import { useState, useCallback } from 'react';
 import { useTheme } from 'next-themes';
-import { Sun, Moon, RefreshCw } from 'lucide-react';
+import { Sun, Moon, RefreshCw } from '@stevederico/skateboard-ui/icons';
 import { getState } from '@stevederico/skateboard-ui/Context';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';

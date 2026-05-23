@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CircleAlert, ArrowUp, ArrowDown } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { CircleAlert, ArrowUp, ArrowDown } from '@stevederico/skateboard-ui/icons';
 import { apiRequest } from '@stevederico/skateboard-ui/Utilities';
 import Header from '@stevederico/skateboard-ui/Header';
 import { Spinner } from '@stevederico/skateboard-ui/shadcn/ui/spinner';
