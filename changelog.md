@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+0.28.1
+
+  Fix recharts es-toolkit crash
+
 0.28.0
 
   Bump skateboard 3.4.0
