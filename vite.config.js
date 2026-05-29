@@ -219,6 +219,46 @@ const dynamicManifestPlugin = () => {
 
 // ===== VITE CONFIGURATION =====
 
+/**
+ * Routes recharts' `es-toolkit/compat/<name>` default imports to es-toolkit's
+ * ESM build instead of its CommonJS shims.
+ *
+ * The CJS shims (`module.exports = require('../dist/.../<name>.js').<name>`)
+ * pull in dist files whose internal helpers are named `require_isUnsafeProperty`,
+ * `require_toKey`, etc. Those identifiers collide with esbuild's own
+ * auto-generated `require_<name>` CJS-interop wrappers, so the bundler ends up
+ * calling a namespace object as a function — the production "require_isUnsafeProperty
+ * is not a function" crash. The `.mjs` build has no such collision.
+ *
+ * Each `es-toolkit/compat/<name>` resolves to a virtual module that re-exports
+ * the named export from the pure-ESM `es-toolkit/compat` barrel as the default,
+ * matching how recharts imports it (`import get from 'es-toolkit/compat/get'`).
+ *
+ * @returns {import('vite').Plugin} Vite plugin object
+ */
+const esToolkitCompatEsmPlugin = () => {
+  const prefix = 'es-toolkit/compat/';
+  const virtualPrefix = '\0es-toolkit-compat-esm:';
+  return {
+    name: 'es-toolkit-compat-esm',
+    enforce: 'pre',
+    resolveId(id) {
+      // Redirect deep compat imports (but not the barrel `es-toolkit/compat` itself)
+      if (id.startsWith(prefix) && id.slice(prefix.length).length > 0) {
+        return virtualPrefix + id.slice(prefix.length);
+      }
+      return null;
+    },
+    load(id) {
+      if (id.startsWith(virtualPrefix)) {
+        const name = id.slice(virtualPrefix.length);
+        return `export { ${name} as default, ${name} } from 'es-toolkit/compat';`;
+      }
+      return null;
+    },
+  };
+};
+
 export default defineConfig({
   plugins: [
     react(),
@@ -227,7 +267,8 @@ export default defineConfig({
     htmlReplacePlugin(),
     dynamicRobotsPlugin(),
     dynamicSitemapPlugin(),
-    dynamicManifestPlugin()
+    dynamicManifestPlugin(),
+    esToolkitCompatEsmPlugin()
   ],
   esbuild: {
     drop: []
@@ -273,7 +314,25 @@ export default defineConfig({
       target: 'esnext',
       define: {
         global: 'globalThis'
-      }
+      },
+      // Mirror esToolkitCompatEsmPlugin for Vite's dep pre-bundler: the Rollup
+      // plugin above does not run inside esbuild's optimizer, which is what
+      // pre-bundles recharts (and its es-toolkit/compat imports) in dev.
+      plugins: [
+        {
+          name: 'es-toolkit-compat-esm-optimizer',
+          setup(build) {
+            build.onResolve({ filter: /^es-toolkit\/compat\/.+/ }, (args) => ({
+              path: args.path.slice('es-toolkit/compat/'.length),
+              namespace: 'es-toolkit-compat-esm',
+            }));
+            build.onLoad({ filter: /.*/, namespace: 'es-toolkit-compat-esm' }, (args) => ({
+              contents: `export { ${args.path} as default, ${args.path} } from 'es-toolkit/compat';`,
+              resolveDir: process.cwd(),
+            }));
+          },
+        },
+      ]
     }
   },
   build: {
