@@ -12,20 +12,18 @@ dist
 dist-ssr
 *.local
 
-deno.lock
-
 # Environment variables
 .env
-!.env.example
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 backend/.env
-!backend/.env.example
 
 .claude/
-railway.json
+.agent-browser/
+.playwright-mcp/
+deno.lock
 
 # Editor directories and files
 .vscode/*

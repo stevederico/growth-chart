@@ -10,10 +10,9 @@ import { compare as legacyBcryptCompare } from "./vendor/legacy-bcrypt.js";
 import crypto from "crypto";
 
 import { databaseManager } from "./adapters/manager.js";
-import { DatabaseSync } from 'node:sqlite';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFile, mkdir, stat, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { promisify } from 'node:util';
 
 // ==== SERVER CONFIG ====
@@ -72,8 +71,8 @@ const CSRF_MAX_ENTRIES = 50000; // LRU eviction threshold
 /**
  * LRU eviction helper that removes oldest entries when over limit
  *
- * Prevents memory leaks in rate limiter and CSRF stores by removing oldest
- * entries based on timestamp when store exceeds maxEntries threshold.
+ * Prevents memory leaks in CSRF store by removing oldest entries based on
+ * timestamp when store exceeds maxEntries threshold.
  *
  * @param {Map} store - Map to evict entries from
  * @param {number} maxEntries - Maximum entries before eviction
@@ -201,20 +200,6 @@ setInterval(() => {
     logger.debug('CSRF cleanup completed', { removedTokens: cleaned });
   }
 }, 60 * 60 * 1000); // Run every hour
-
-// ==== RATE LIMITING ====
-
-/**
- * Rate limiting middleware (stub)
- *
- * @async
- * @param {Context} c - Hono context
- * @param {Function} next - Next middleware function
- */
-async function rateLimitMiddleware(c, next) {
-  await next();
-}
-
 
 // ==== ACCOUNT LOCKOUT ====
 const loginAttemptStore = new Map(); // email -> { attempts, lockedUntil }
@@ -452,6 +437,7 @@ const db = {
   updateUser: (query, update) => databaseManager.updateUser(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, query, update),
   findAuth: (query) => databaseManager.findAuth(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, query),
   insertAuth: (authData) => databaseManager.insertAuth(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, authData),
+  updateAuth: (query, update) => databaseManager.updateAuth(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, query, update),
   findWebhookEvent: (eventId) => databaseManager.findWebhookEvent(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, eventId),
   insertWebhookEvent: (eventId, eventType, processedAt) => databaseManager.insertWebhookEvent(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, eventId, eventType, processedAt),
   executeQuery: (queryObject) => databaseManager.executeQuery(currentDbConfig.dbType, currentDbConfig.db, currentDbConfig.connectionString, queryObject)
@@ -476,9 +462,6 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization', 'x-csrf-token'],
   credentials: true
 }));
-
-// Rate limiting middleware
-app.use('*', rateLimitMiddleware);
 
 // Apache Common Log Format middleware
 app.use('*', async (c, next) => {
@@ -831,6 +814,56 @@ function setAuthCookies(c, userID, jwtToken) {
 }
 
 // ==== STRIPE WEBHOOK (raw body needed) ====
+
+/**
+ * Resolve a Stripe customer ID to a normalized lowercase email.
+ *
+ * @param {string} stripeID - Stripe customer ID
+ * @returns {Promise<string|null>} Normalized email, or null if missing
+ */
+async function resolveCustomerEmail(stripeID) {
+  const customer = await stripe.customers.retrieve(stripeID);
+  if (!customer?.email) {
+    logger.warn('Webhook: Customer has no email', { stripeID });
+    return null;
+  }
+  return customer.email.toLowerCase();
+}
+
+/**
+ * Build the canonical user.subscription patch from a Stripe customer ID
+ * and a Stripe subscription object.
+ *
+ * @param {string} stripeID - Stripe customer ID
+ * @param {object} stripeSub - Stripe subscription object
+ * @returns {{stripeID: string, expires: number, status: string}}
+ */
+function buildSubscriptionPatch(stripeID, stripeSub) {
+  return {
+    stripeID,
+    expires: stripeSub.current_period_end,
+    status: stripeSub.status
+  };
+}
+
+/**
+ * Apply a $set patch to the user identified by email. Returns false if no
+ * matching user is found (silent no-op so Stripe will not retry).
+ *
+ * @param {string} email - Normalized email
+ * @param {object} $set - MongoDB-style $set fields
+ * @returns {Promise<boolean>} True if a user was patched
+ */
+async function applyUserPatch(email, $set) {
+  const user = await db.findUser({ email });
+  if (!user) {
+    logger.warn('Webhook: No user found for email', { email });
+    return false;
+  }
+  await db.updateUser({ email }, { $set });
+  return true;
+}
+
 app.post("/api/payment", async (c) => {
   logger.info('Payment webhook received');
 
@@ -860,85 +893,56 @@ app.post("/api/payment", async (c) => {
 
     const eventObject = event.data.object;
 
-    // Handle subscription lifecycle events
     if (["customer.subscription.deleted", "customer.subscription.updated", "customer.subscription.created"].includes(event.type)) {
       const { customer: stripeID, current_period_end, status } = eventObject;
       if (!stripeID) {
         logger.error('Webhook missing customer ID', { type: event.type });
         return c.body(null, 400);
       }
-
-      const customer = await stripe.customers.retrieve(stripeID);
-      if (!customer || !customer.email) {
-        logger.error('Webhook: Customer has no email', { stripeID });
-        return c.body(null, 400);
-      }
-
-      const customerEmail = customer.email.toLowerCase();
-      const user = await db.findUser({ email: customerEmail });
-      if (user) {
-        await db.updateUser({ email: customerEmail }, {
-          $set: { subscription: { stripeID, expires: current_period_end, status } }
-        });
-        logger.info('Subscription updated', { type: event.type, email: customerEmail, status });
-      } else {
-        logger.warn('Webhook: No user found for email', { email: customerEmail });
-      }
+      const email = await resolveCustomerEmail(stripeID);
+      if (!email) return c.body(null, 400);
+      const ok = await applyUserPatch(email, { subscription: { stripeID, expires: current_period_end, status } });
+      if (ok) logger.info('Subscription updated', { type: event.type, email, status });
     }
 
-    // Handle checkout session completed (initial subscription)
     if (event.type === "checkout.session.completed") {
       const { customer: stripeID, customer_email, subscription: subscriptionId } = eventObject;
       if (subscriptionId && stripeID) {
-        const subscriptionPromise = stripe.subscriptions.retrieve(subscriptionId);
-        const customerPromise = !customer_email ? stripe.customers.retrieve(stripeID) : null;
-        const [subscription, fetchedCustomer] = await Promise.all([subscriptionPromise, customerPromise]);
-        const customerEmail = (customer_email || fetchedCustomer.email).toLowerCase();
-        const user = await db.findUser({ email: customerEmail });
-        if (user) {
-          await db.updateUser({ email: customerEmail }, {
-            $set: { subscription: { stripeID, expires: subscription.current_period_end, status: subscription.status } }
-          });
-          logger.info('Checkout completed', { email: customerEmail, status: subscription.status });
+        const [subscription, email] = await Promise.all([
+          stripe.subscriptions.retrieve(subscriptionId),
+          customer_email ? Promise.resolve(customer_email.toLowerCase()) : resolveCustomerEmail(stripeID)
+        ]);
+        if (email) {
+          const ok = await applyUserPatch(email, { subscription: buildSubscriptionPatch(stripeID, subscription) });
+          if (ok) logger.info('Checkout completed', { email, status: subscription.status });
         }
       }
     }
 
-    // Handle invoice paid (recurring payment success)
     if (event.type === "invoice.paid") {
       const { customer: stripeID, subscription: subscriptionId } = eventObject;
       if (subscriptionId && stripeID) {
-        const [subscription, customer] = await Promise.all([
+        const [subscription, email] = await Promise.all([
           stripe.subscriptions.retrieve(subscriptionId),
-          stripe.customers.retrieve(stripeID)
+          resolveCustomerEmail(stripeID)
         ]);
-        if (customer?.email) {
-          const customerEmail = customer.email.toLowerCase();
-          const user = await db.findUser({ email: customerEmail });
-          if (user) {
-            await db.updateUser({ email: customerEmail }, {
-              $set: { subscription: { stripeID, expires: subscription.current_period_end, status: subscription.status } }
-            });
-            logger.info('Invoice paid', { email: customerEmail });
-          }
+        if (email) {
+          const ok = await applyUserPatch(email, { subscription: buildSubscriptionPatch(stripeID, subscription) });
+          if (ok) logger.info('Invoice paid', { email });
         }
       }
     }
 
-    // Handle invoice payment failed
     if (event.type === "invoice.payment_failed") {
       const { customer: stripeID } = eventObject;
       if (stripeID) {
-        const customer = await stripe.customers.retrieve(stripeID);
-        if (customer?.email) {
-          const customerEmail = customer.email.toLowerCase();
-          const user = await db.findUser({ email: customerEmail });
-          if (user) {
-            await db.updateUser({ email: customerEmail }, {
-              $set: { 'subscription.paymentFailed': true, 'subscription.paymentFailedAt': Date.now() }
-            });
-            logger.warn('Invoice payment failed', { email: customerEmail });
-          }
+        const email = await resolveCustomerEmail(stripeID);
+        if (email) {
+          const ok = await applyUserPatch(email, {
+            'subscription.paymentFailed': true,
+            'subscription.paymentFailedAt': Date.now()
+          });
+          if (ok) logger.warn('Invoice payment failed', { email });
         }
       }
     }
@@ -952,1019 +956,6 @@ app.post("/api/payment", async (c) => {
 
 // ==== STATIC ROUTES ====
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
-
-// ==== GITHUB DOWNLOAD TRACKING ====
-const GITHUB_REPOS = (process.env.GITHUB_REPOS || process.env.GITHUB_REPO || '')
-  .split(',')
-  .map(r => r.trim())
-  .filter(Boolean);
-
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-
-/**
- * Build headers for GitHub API requests.
- * @param {boolean} [authenticated=false] - Include Authorization header
- * @returns {Object} Headers object
- */
-function githubHeaders(authenticated = false) {
-  const headers = {
-    'User-Agent': 'GrowthChart-Bot/1.0',
-    'Accept': 'application/vnd.github+json',
-  };
-  if (authenticated && GITHUB_TOKEN) {
-    headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
-  }
-  return headers;
-}
-
-try { mkdirSync('./backend/databases', { recursive: true }); } catch {}
-const downloadsDb = new DatabaseSync(currentDbConfig.connectionString || './backend/databases/GrowthChart.db');
-downloadsDb.exec('PRAGMA journal_mode = WAL');
-downloadsDb.exec('PRAGMA synchronous = NORMAL');
-
-downloadsDb.exec(`
-  CREATE TABLE IF NOT EXISTS downloads (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo TEXT NOT NULL DEFAULT '',
-    date TEXT NOT NULL,
-    tag TEXT NOT NULL,
-    download_count INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
-  )
-`);
-
-// Migration: add repo column to existing databases (must run before index creation)
-try {
-  downloadsDb.prepare('SELECT repo FROM downloads LIMIT 1').get();
-} catch {
-  logger.info('Migrating downloads table: adding repo column');
-  downloadsDb.exec(`ALTER TABLE downloads ADD COLUMN repo TEXT NOT NULL DEFAULT ''`);
-  downloadsDb.exec(`DROP INDEX IF EXISTS idx_downloads_date_tag`);
-  const defaultRepo = GITHUB_REPOS[0] || '';
-  downloadsDb.prepare(`UPDATE downloads SET repo = ? WHERE repo = ''`).run(defaultRepo);
-  logger.info('Migration complete: repo column added', { defaultRepo });
-}
-
-downloadsDb.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_downloads_repo_date_tag ON downloads(repo, date, tag)
-`);
-
-downloadsDb.exec(`
-  CREATE TABLE IF NOT EXISTS repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo TEXT NOT NULL UNIQUE,
-    created_at TEXT DEFAULT (datetime('now'))
-  )
-`);
-
-// Seed repos table from GITHUB_REPOS env var if empty
-const repoCount = downloadsDb.prepare('SELECT COUNT(*) as count FROM repos').get();
-if (repoCount.count === 0 && GITHUB_REPOS.length > 0) {
-  const insertRepo = downloadsDb.prepare('INSERT OR IGNORE INTO repos (repo) VALUES (?)');
-  for (const repo of GITHUB_REPOS) {
-    insertRepo.run(repo);
-  }
-  logger.info('Seeded repos table from GITHUB_REPOS env var', { count: GITHUB_REPOS.length });
-}
-
-downloadsDb.exec(`
-  CREATE TABLE IF NOT EXISTS github_metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo TEXT NOT NULL,
-    date TEXT NOT NULL,
-    metric TEXT NOT NULL,
-    count INTEGER NOT NULL DEFAULT 0,
-    uniques INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
-  )
-`);
-downloadsDb.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_github_metrics_repo_date_metric
-    ON github_metrics(repo, date, metric)
-`);
-
-/** Read all repo records from the database. */
-function getReposFromDb() {
-  return downloadsDb.prepare('SELECT id, repo, created_at FROM repos ORDER BY created_at ASC').all();
-}
-
-/** Read repo name strings from the database. */
-function getRepoListFromDb() {
-  return getReposFromDb().map(r => r.repo);
-}
-
-/**
- * Fetch GitHub release download counts for a single repo and store a daily snapshot.
- *
- * Calls the GitHub Releases API for the given repo, sums asset
- * download_count per release, and upserts rows keyed on (repo, date, tag).
- * Idempotent — safe to call multiple times per day.
- *
- * @async
- * @param {string} repo - GitHub repo in "owner/name" format
- * @returns {Promise<{repo: string, date: string, releases: Array<{tag: string, download_count: number}>}>}
- */
-async function fetchDownloadSnapshot(repo) {
-  if (!repo) {
-    logger.warn('No repo provided, skipping snapshot');
-    return;
-  }
-  const today = new Date().toISOString().split('T')[0];
-
-  // Check if we already have a snapshot for this repo today
-  const existing = downloadsDb.prepare(
-    'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
-  ).get(repo, today);
-  if (existing.count > 0) {
-    logger.debug('Snapshot already exists for today', { repo, date: today });
-    return { repo, date: today, releases: [] };
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}/releases?per_page=100`,
-      { headers: githubHeaders() }
-    );
-
-    if (!response.ok) {
-      const status = response.status;
-      const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-      logger.warn('GitHub API request failed', { repo, status, rateLimitRemaining });
-      throw new Error(`GitHub API returned ${status}`);
-    }
-
-    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-    if (rateLimitRemaining) {
-      logger.debug('GitHub rate limit remaining', { remaining: rateLimitRemaining });
-    }
-
-    const releases = await response.json();
-    const insertStmt = downloadsDb.prepare(
-      `INSERT OR REPLACE INTO downloads (repo, date, tag, download_count) VALUES (?, ?, ?, ?)`
-    );
-
-    const results = [];
-    for (const release of releases) {
-      const tag = release.tag_name;
-      const downloadCount = (release.assets || []).reduce(
-        (sum, asset) => sum + (asset.download_count || 0), 0
-      );
-      insertStmt.run(repo, today, tag, downloadCount);
-      results.push({ tag, download_count: downloadCount });
-    }
-
-    logger.info('Download snapshot saved', { repo, date: today, releaseCount: results.length });
-    return { repo, date: today, releases: results };
-  } catch (err) {
-    logger.error('Failed to fetch download snapshot', { repo, error: err.message });
-    throw err;
-  }
-}
-
-/**
- * Fetch download snapshots for all configured repos.
- *
- * Reads the repo list from the database and calls fetchDownloadSnapshot for each.
- * Errors for individual repos are logged but do not stop processing.
- *
- * @async
- * @returns {Promise<void>}
- */
-async function fetchAllSnapshots() {
-  const repos = getRepoListFromDb();
-  if (repos.length === 0) {
-    logger.warn('No repos configured, skipping snapshot');
-    return;
-  }
-  for (const repo of repos) {
-    try {
-      await fetchDownloadSnapshot(repo);
-    } catch (err) {
-      logger.error('Snapshot failed for repo', { repo, error: err.message });
-    }
-  }
-}
-
-/**
- * Fetch GitHub traffic clone counts for a repo and upsert daily rows.
- *
- * Calls GET /repos/{owner}/{repo}/traffic/clones (requires auth).
- * Each entry in the response clones array is upserted into github_metrics
- * with metric='clones'. Skips entirely if GITHUB_TOKEN is not set.
- *
- * @async
- * @param {string} repo - GitHub repo in "owner/name" format
- * @returns {Promise<void>}
- */
-async function fetchTrafficClones(repo) {
-  if (!GITHUB_TOKEN) {
-    logger.warn('GITHUB_TOKEN not set, skipping traffic clones', { repo });
-    return;
-  }
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}/traffic/clones`,
-      { headers: githubHeaders(true) }
-    );
-
-    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-    if (rateLimitRemaining) {
-      logger.debug('GitHub rate limit remaining (clones)', { remaining: rateLimitRemaining });
-    }
-
-    if (!response.ok) {
-      logger.warn('GitHub traffic/clones API failed', { repo, status: response.status, rateLimitRemaining });
-      return;
-    }
-
-    const data = await response.json();
-    const insertStmt = downloadsDb.prepare(
-      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'clones', ?, ?)`
-    );
-    for (const entry of (data.clones || [])) {
-      const date = new Date(entry.timestamp).toISOString().split('T')[0];
-      insertStmt.run(repo, date, entry.count || 0, entry.uniques || 0);
-    }
-    logger.info('Traffic clones snapshot saved', { repo, entries: (data.clones || []).length });
-  } catch (err) {
-    logger.error('Failed to fetch traffic clones', { repo, error: err.message });
-  }
-}
-
-/**
- * Fetch GitHub traffic view counts for a repo and upsert daily rows.
- *
- * Calls GET /repos/{owner}/{repo}/traffic/views (requires auth).
- * Each entry in the response views array is upserted into github_metrics
- * with metric='views'. Skips entirely if GITHUB_TOKEN is not set.
- *
- * @async
- * @param {string} repo - GitHub repo in "owner/name" format
- * @returns {Promise<void>}
- */
-async function fetchTrafficViews(repo) {
-  if (!GITHUB_TOKEN) {
-    logger.warn('GITHUB_TOKEN not set, skipping traffic views', { repo });
-    return;
-  }
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}/traffic/views`,
-      { headers: githubHeaders(true) }
-    );
-
-    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-    if (rateLimitRemaining) {
-      logger.debug('GitHub rate limit remaining (views)', { remaining: rateLimitRemaining });
-    }
-
-    if (!response.ok) {
-      logger.warn('GitHub traffic/views API failed', { repo, status: response.status, rateLimitRemaining });
-      return;
-    }
-
-    const data = await response.json();
-    const insertStmt = downloadsDb.prepare(
-      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'views', ?, ?)`
-    );
-    for (const entry of (data.views || [])) {
-      const date = new Date(entry.timestamp).toISOString().split('T')[0];
-      insertStmt.run(repo, date, entry.count || 0, entry.uniques || 0);
-    }
-    logger.info('Traffic views snapshot saved', { repo, entries: (data.views || []).length });
-  } catch (err) {
-    logger.error('Failed to fetch traffic views', { repo, error: err.message });
-  }
-}
-
-/**
- * Fetch current stargazer count for a repo and store as today's snapshot.
- *
- * Calls GET /repos/{owner}/{repo} and stores stargazers_count with
- * metric='stars'. Uses auth token if available for higher rate limits.
- * Idempotent — checks for existing row before inserting.
- *
- * @async
- * @param {string} repo - GitHub repo in "owner/name" format
- * @returns {Promise<void>}
- */
-async function fetchStarsSnapshot(repo) {
-  const today = new Date().toISOString().split('T')[0];
-  const existing = downloadsDb.prepare(
-    "SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = 'stars'"
-  ).get(repo, today);
-  if (existing.count > 0) {
-    logger.debug('Stars snapshot already exists for today', { repo, date: today });
-    return;
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}`,
-      { headers: githubHeaders(!!GITHUB_TOKEN) }
-    );
-
-    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-    if (rateLimitRemaining) {
-      logger.debug('GitHub rate limit remaining (stars)', { remaining: rateLimitRemaining });
-    }
-
-    if (!response.ok) {
-      logger.warn('GitHub repo API failed (stars)', { repo, status: response.status, rateLimitRemaining });
-      return;
-    }
-
-    const data = await response.json();
-    downloadsDb.prepare(
-      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'stars', ?, 0)`
-    ).run(repo, today, data.stargazers_count || 0);
-    logger.info('Stars snapshot saved', { repo, date: today, stars: data.stargazers_count });
-  } catch (err) {
-    logger.error('Failed to fetch stars snapshot', { repo, error: err.message });
-  }
-}
-
-/**
- * Fetch current fork count for a repo and store as today's snapshot.
- *
- * Calls GET /repos/{owner}/{repo} and stores forks_count with
- * metric='forks'. Uses auth token if available for higher rate limits.
- * Idempotent — checks for existing row before inserting.
- *
- * @async
- * @param {string} repo - GitHub repo in "owner/name" format
- * @returns {Promise<void>}
- */
-async function fetchForksSnapshot(repo) {
-  const today = new Date().toISOString().split('T')[0];
-  const existing = downloadsDb.prepare(
-    "SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = 'forks'"
-  ).get(repo, today);
-  if (existing.count > 0) {
-    logger.debug('Forks snapshot already exists for today', { repo, date: today });
-    return;
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/${repo}`,
-      { headers: githubHeaders(!!GITHUB_TOKEN) }
-    );
-
-    const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-    if (rateLimitRemaining) {
-      logger.debug('GitHub rate limit remaining (forks)', { remaining: rateLimitRemaining });
-    }
-
-    if (!response.ok) {
-      logger.warn('GitHub repo API failed (forks)', { repo, status: response.status, rateLimitRemaining });
-      return;
-    }
-
-    const data = await response.json();
-    downloadsDb.prepare(
-      `INSERT OR REPLACE INTO github_metrics (repo, date, metric, count, uniques) VALUES (?, ?, 'forks', ?, 0)`
-    ).run(repo, today, data.forks_count || 0);
-    logger.info('Forks snapshot saved', { repo, date: today, forks: data.forks_count });
-  } catch (err) {
-    logger.error('Failed to fetch forks snapshot', { repo, error: err.message });
-  }
-}
-
-/**
- * Fetch all GitHub metric snapshots for every tracked repo.
- *
- * Iterates getRepoListFromDb() and calls fetchTrafficClones,
- * fetchTrafficViews, fetchStarsSnapshot, and fetchForksSnapshot
- * for each. Errors per-repo are logged but do not stop processing.
- *
- * @async
- * @returns {Promise<void>}
- */
-async function fetchAllMetricSnapshots() {
-  const repos = getRepoListFromDb();
-  if (repos.length === 0) {
-    logger.warn('No repos configured, skipping metric snapshots');
-    return;
-  }
-  for (const repo of repos) {
-    try {
-      await fetchTrafficClones(repo);
-    } catch (err) {
-      logger.error('Traffic clones failed for repo', { repo, error: err.message });
-    }
-    try {
-      await fetchTrafficViews(repo);
-    } catch (err) {
-      logger.error('Traffic views failed for repo', { repo, error: err.message });
-    }
-    try {
-      await fetchStarsSnapshot(repo);
-    } catch (err) {
-      logger.error('Stars snapshot failed for repo', { repo, error: err.message });
-    }
-    try {
-      await fetchForksSnapshot(repo);
-    } catch (err) {
-      logger.error('Forks snapshot failed for repo', { repo, error: err.message });
-    }
-  }
-}
-
-/**
- * GET /api/downloads/repos — Return the list of configured repos.
- */
-app.get('/api/downloads/repos', (c) => {
-  return c.json({ repos: getRepoListFromDb() });
-});
-
-/**
- * GET /api/repos — List all tracked repos with id, name, and created_at.
- */
-app.get('/api/repos', (c) => {
-  const repos = getReposFromDb();
-  return c.json({ repos });
-});
-
-/**
- * POST /api/repos — Add a repo to the tracking list.
- * Validates the repo exists on GitHub before inserting.
- * Triggers an initial download snapshot in the background.
- *
- * @body {string} repo - GitHub repo in "owner/name" format
- */
-app.post('/api/repos', async (c) => {
-  const body = await c.req.json();
-  const repo = body?.repo?.trim();
-  if (!repo || !repo.includes('/')) {
-    return c.json({ error: 'Repo must be in "owner/name" format' }, 400);
-  }
-
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}`, {
-      headers: githubHeaders()
-    });
-    if (!res.ok) {
-      return c.json({ error: `GitHub repo "${repo}" not found` }, 400);
-    }
-  } catch {
-    return c.json({ error: 'Failed to validate repo on GitHub' }, 502);
-  }
-
-  try {
-    downloadsDb.prepare('INSERT INTO repos (repo) VALUES (?)').run(repo);
-  } catch (err) {
-    if (err.message?.includes('UNIQUE')) {
-      return c.json({ error: 'Repo already added' }, 409);
-    }
-    throw err;
-  }
-
-  const inserted = downloadsDb.prepare('SELECT id, repo, created_at FROM repos WHERE repo = ?').get(repo);
-
-  // Fetch all snapshots before responding so data is available immediately
-  const fetchers = [fetchDownloadSnapshot, fetchStarsSnapshot, fetchForksSnapshot];
-  if (GITHUB_TOKEN) {
-    fetchers.push(fetchTrafficClones, fetchTrafficViews);
-  }
-  await Promise.allSettled(fetchers.map(fn => fn(repo)));
-
-  return c.json(inserted, 201);
-});
-
-/**
- * DELETE /api/repos/:id — Remove a repo from the tracking list.
- * Download history is preserved; only the repo record is deleted.
- *
- * @param {number} id - Repo record ID
- */
-app.delete('/api/repos/:id', (c) => {
-  const id = parseInt(c.req.param('id'));
-  const existing = downloadsDb.prepare('SELECT repo FROM repos WHERE id = ?').get(id);
-  if (!existing) {
-    return c.json({ error: 'Repo not found' }, 404);
-  }
-  downloadsDb.prepare('DELETE FROM repos WHERE id = ?').run(id);
-  return c.json({ message: 'Repo removed', repo: existing.repo });
-});
-
-/**
- * GET /api/downloads — Return all download snapshots.
- * Optional query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD&repo=owner/name
- */
-app.get('/api/downloads', (c) => {
-  try {
-    const from = c.req.query('from');
-    const to = c.req.query('to');
-    const repo = c.req.query('repo');
-
-    let sql = 'SELECT repo, date, tag, download_count FROM downloads';
-    const conditions = [];
-    const params = [];
-
-    if (repo) {
-      conditions.push('repo = ?');
-      params.push(repo);
-    }
-    if (from) {
-      conditions.push('date >= ?');
-      params.push(from);
-    }
-    if (to) {
-      conditions.push('date <= ?');
-      params.push(to);
-    }
-
-    if (conditions.length > 0) {
-      sql += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    sql += ' ORDER BY date DESC, tag ASC';
-
-    const rows = downloadsDb.prepare(sql).all(...params);
-    return c.json(rows);
-  } catch (err) {
-    logger.error('Failed to fetch downloads', { error: err.message });
-    return c.json({ error: 'Failed to fetch downloads' }, 500);
-  }
-});
-
-/**
- * GET /api/downloads/daily — Return daily download deltas.
- * Computes the difference in cumulative downloads between consecutive days.
- * Optional query param: ?repo=owner/name
- */
-app.get('/api/downloads/daily', (c) => {
-  try {
-    const repo = c.req.query('repo');
-    let sql = 'SELECT repo, date, tag, download_count FROM downloads';
-    const params = [];
-
-    if (repo) {
-      sql += ' WHERE repo = ?';
-      params.push(repo);
-    }
-
-    sql += ' ORDER BY date ASC, tag ASC';
-    const rows = downloadsDb.prepare(sql).all(...params);
-
-    // Group by date
-    const byDate = new Map();
-    for (const row of rows) {
-      if (!byDate.has(row.date)) byDate.set(row.date, []);
-      byDate.get(row.date).push({ tag: row.tag, download_count: row.download_count });
-    }
-
-    const dates = Array.from(byDate.keys()).sort();
-    const dailyDeltas = [];
-
-    for (let i = 1; i < dates.length; i++) {
-      const prevDate = dates[i - 1];
-      const currDate = dates[i];
-      const prevMap = new Map(byDate.get(prevDate).map(r => [r.tag, r.download_count]));
-      const currEntries = byDate.get(currDate);
-
-      let total = 0;
-      const releases = [];
-
-      for (const entry of currEntries) {
-        const prevCount = prevMap.get(entry.tag) || 0;
-        const delta = entry.download_count - prevCount;
-        if (delta !== 0) {
-          releases.push({ tag: entry.tag, delta });
-          total += delta;
-        }
-      }
-
-      dailyDeltas.push({ date: currDate, total, releases });
-    }
-
-    return c.json(dailyDeltas);
-  } catch (err) {
-    logger.error('Failed to compute daily deltas', { error: err.message });
-    return c.json({ error: 'Failed to compute daily deltas' }, 500);
-  }
-});
-
-/**
- * GET /api/downloads/latest — Return the most recent snapshot
- * with a total across all releases.
- * Optional query param: ?repo=owner/name
- */
-app.get('/api/downloads/latest', (c) => {
-  try {
-    const repo = c.req.query('repo');
-    let dateSql = 'SELECT date FROM downloads';
-    const dateParams = [];
-
-    if (repo) {
-      dateSql += ' WHERE repo = ?';
-      dateParams.push(repo);
-    }
-
-    dateSql += ' ORDER BY date DESC LIMIT 1';
-    const latestDate = downloadsDb.prepare(dateSql).get(...dateParams);
-
-    if (!latestDate) {
-      return c.json({ date: null, total: 0, releases: [] });
-    }
-
-    let rowsSql = 'SELECT tag, download_count FROM downloads WHERE date = ?';
-    const rowsParams = [latestDate.date];
-
-    if (repo) {
-      rowsSql += ' AND repo = ?';
-      rowsParams.push(repo);
-    }
-
-    rowsSql += ' ORDER BY tag ASC';
-    const rows = downloadsDb.prepare(rowsSql).all(...rowsParams);
-
-    const total = rows.reduce((sum, r) => sum + r.download_count, 0);
-
-    return c.json({
-      date: latestDate.date,
-      total,
-      releases: rows.map(r => ({ tag: r.tag, download_count: r.download_count }))
-    });
-  } catch (err) {
-    logger.error('Failed to fetch latest downloads', { error: err.message });
-    return c.json({ error: 'Failed to fetch latest downloads' }, 500);
-  }
-});
-
-/**
- * POST /api/downloads/snapshot — Manually trigger a download snapshot.
- * Optional body: { repo: "owner/name" } to snapshot a single repo.
- * If omitted, snapshots all configured repos.
- */
-app.post('/api/downloads/snapshot', async (c) => {
-  try {
-    let repo;
-    try {
-      const body = await c.req.json();
-      repo = body?.repo;
-    } catch {
-      // No body or invalid JSON — snapshot all repos
-    }
-
-    if (repo) {
-      const result = await fetchDownloadSnapshot(repo);
-      return c.json(result, 201);
-    }
-
-    await fetchAllSnapshots();
-    return c.json({ message: 'Snapshots completed for all repos', repos: getRepoListFromDb() }, 201);
-  } catch (err) {
-    return c.json({ error: 'Failed to fetch snapshot: ' + err.message }, 500);
-  }
-});
-
-/**
- * POST /api/downloads/backfill — Insert a historical total for a given date.
- * Distributes the total proportionally across releases based on the nearest existing snapshot.
- *
- * @body {string} date - YYYY-MM-DD date to backfill
- * @body {number} total - Total download count for that date
- * @body {string} [repo] - GitHub repo in "owner/name" format (defaults to first configured repo)
- */
-app.post('/api/downloads/backfill', async (c) => {
-  try {
-    const body = await c.req.json();
-    const { date, total } = body;
-    const repo = body.repo || getRepoListFromDb()[0] || '';
-    if (!date || total == null) {
-      return c.json({ error: 'date and total are required' }, 400);
-    }
-
-    const nearest = downloadsDb.prepare(
-      'SELECT DISTINCT date FROM downloads WHERE repo = ? ORDER BY ABS(julianday(date) - julianday(?)) LIMIT 1'
-    ).get(repo, date);
-
-    if (!nearest) {
-      return c.json({ error: 'No existing snapshots to base distribution on' }, 400);
-    }
-
-    const refRows = downloadsDb.prepare(
-      'SELECT tag, download_count FROM downloads WHERE repo = ? AND date = ?'
-    ).all(repo, nearest.date);
-
-    const refTotal = refRows.reduce((s, r) => s + r.download_count, 0);
-    const insertStmt = downloadsDb.prepare(
-      'INSERT OR REPLACE INTO downloads (repo, date, tag, download_count) VALUES (?, ?, ?, ?)'
-    );
-
-    const results = [];
-    let assigned = 0;
-    for (let i = 0; i < refRows.length; i++) {
-      const tag = refRows[i].tag;
-      const count = i === refRows.length - 1
-        ? total - assigned
-        : Math.round((refRows[i].download_count / refTotal) * total);
-      assigned += count;
-      insertStmt.run(repo, date, tag, Math.max(0, count));
-      results.push({ tag, download_count: Math.max(0, count) });
-    }
-
-    logger.info('Backfill saved', { repo, date, total, releaseCount: results.length });
-    return c.json({ repo, date, total, releases: results }, 201);
-  } catch (err) {
-    logger.error('Backfill failed', { error: err.message });
-    return c.json({ error: 'Backfill failed: ' + err.message }, 500);
-  }
-});
-
-// ==== GITHUB METRICS ROUTES ====
-
-const VALID_METRICS = ['stars', 'forks', 'clones', 'views'];
-
-/**
- * GET /api/metrics — Query github_metrics rows.
- * Required query param: metric (stars|forks|clones|views).
- * Optional: repo, from, to.
- */
-app.get('/api/metrics', (c) => {
-  try {
-    const metric = c.req.query('metric');
-    if (!metric || !VALID_METRICS.includes(metric)) {
-      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
-    }
-
-    const repo = c.req.query('repo');
-    const from = c.req.query('from');
-    const to = c.req.query('to');
-
-    let sql = 'SELECT repo, date, metric, count, uniques FROM github_metrics WHERE metric = ?';
-    const params = [metric];
-
-    if (repo) {
-      sql += ' AND repo = ?';
-      params.push(repo);
-    }
-    if (from) {
-      sql += ' AND date >= ?';
-      params.push(from);
-    }
-    if (to) {
-      sql += ' AND date <= ?';
-      params.push(to);
-    }
-
-    sql += ' ORDER BY date DESC';
-    const rows = downloadsDb.prepare(sql).all(...params);
-    return c.json(rows);
-  } catch (err) {
-    logger.error('Failed to fetch metrics', { error: err.message });
-    return c.json({ error: 'Failed to fetch metrics' }, 500);
-  }
-});
-
-/**
- * GET /api/metrics/daily — Daily values for a metric.
- * Clones and views are already per-day values from GitHub.
- * Stars and forks are cumulative, so day-over-day deltas are computed.
- * Required query param: metric. Optional: repo.
- * Returns [{date, total}] matching /api/downloads/daily shape.
- */
-app.get('/api/metrics/daily', (c) => {
-  try {
-    const metric = c.req.query('metric');
-    if (!metric || !VALID_METRICS.includes(metric)) {
-      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
-    }
-
-    const repo = c.req.query('repo');
-    let sql = 'SELECT date, SUM(count) as count, SUM(uniques) as uniques FROM github_metrics WHERE metric = ?';
-    const params = [metric];
-
-    if (repo) {
-      sql += ' AND repo = ?';
-      params.push(repo);
-    }
-
-    sql += ' GROUP BY date ORDER BY date ASC';
-    const rows = downloadsDb.prepare(sql).all(...params);
-
-    // Clones and views are already per-day values from GitHub — return as-is
-    const isPerDay = metric === 'clones' || metric === 'views';
-    const dailyData = [];
-    if (isPerDay) {
-      for (const row of rows) {
-        dailyData.push({ date: row.date, total: row.count });
-      }
-    } else {
-      // Stars and forks are cumulative — compute deltas
-      if (rows.length > 0) {
-        dailyData.push({ date: rows[0].date, total: rows[0].count });
-      }
-      for (let i = 1; i < rows.length; i++) {
-        const delta = rows[i].count - rows[i - 1].count;
-        dailyData.push({ date: rows[i].date, total: delta });
-      }
-    }
-
-    return c.json(dailyData);
-  } catch (err) {
-    logger.error('Failed to compute metric daily deltas', { error: err.message });
-    return c.json({ error: 'Failed to compute metric daily deltas' }, 500);
-  }
-});
-
-/**
- * GET /api/metrics/latest — Most recent snapshot for a metric.
- * Required query param: metric. Optional: repo.
- * Returns {date, count, uniques}.
- */
-app.get('/api/metrics/latest', (c) => {
-  try {
-    const metric = c.req.query('metric');
-    if (!metric || !VALID_METRICS.includes(metric)) {
-      return c.json({ error: `metric query param required, one of: ${VALID_METRICS.join(', ')}` }, 400);
-    }
-
-    const repo = c.req.query('repo');
-    let sql = 'SELECT date, SUM(count) as count, SUM(uniques) as uniques FROM github_metrics WHERE metric = ?';
-    const params = [metric];
-
-    if (repo) {
-      sql += ' AND repo = ?';
-      params.push(repo);
-    }
-
-    sql += ' ORDER BY date DESC LIMIT 1';
-    const row = downloadsDb.prepare(sql).get(...params);
-
-    if (!row) {
-      return c.json({ date: null, count: 0, uniques: 0 });
-    }
-
-    return c.json({ date: row.date, count: row.count, uniques: row.uniques });
-  } catch (err) {
-    logger.error('Failed to fetch latest metric', { error: err.message });
-    return c.json({ error: 'Failed to fetch latest metric' }, 500);
-  }
-});
-
-/**
- * GET /api/metrics/overview — Per-repo totals for all metrics.
- * Optional query param: period=daily (most recent day only) or total (default, all-time).
- * Returns [{repo, downloads, stars, forks, clones, uniqueClones, views, uniqueViews}].
- */
-app.get('/api/metrics/overview', (c) => {
-  try {
-    const isDaily = c.req.query('period') === 'daily';
-
-    let trafficRows;
-    if (isDaily) {
-      trafficRows = downloadsDb.prepare(`
-        SELECT m.repo,
-          SUM(CASE WHEN m.metric = 'clones' THEN m.count ELSE 0 END) AS clones,
-          SUM(CASE WHEN m.metric = 'clones' THEN m.uniques ELSE 0 END) AS uniqueClones,
-          SUM(CASE WHEN m.metric = 'views' THEN m.count ELSE 0 END) AS views,
-          SUM(CASE WHEN m.metric = 'views' THEN m.uniques ELSE 0 END) AS uniqueViews
-        FROM github_metrics m
-        INNER JOIN (SELECT MAX(date) AS max_date FROM github_metrics WHERE metric IN ('clones', 'views')) d
-          ON m.date = d.max_date
-        WHERE m.metric IN ('clones', 'views')
-        GROUP BY m.repo
-      `).all();
-    } else {
-      trafficRows = downloadsDb.prepare(`
-        SELECT repo,
-          SUM(CASE WHEN metric = 'clones' THEN count ELSE 0 END) AS clones,
-          SUM(CASE WHEN metric = 'clones' THEN uniques ELSE 0 END) AS uniqueClones,
-          SUM(CASE WHEN metric = 'views' THEN count ELSE 0 END) AS views,
-          SUM(CASE WHEN metric = 'views' THEN uniques ELSE 0 END) AS uniqueViews
-        FROM github_metrics
-        WHERE metric IN ('clones', 'views')
-        GROUP BY repo
-      `).all();
-    }
-
-    const latestRows = downloadsDb.prepare(`
-      SELECT repo, metric, count FROM github_metrics
-      WHERE (repo, metric, date) IN (
-        SELECT repo, metric, MAX(date) FROM github_metrics
-        WHERE metric IN ('stars', 'forks')
-        GROUP BY repo, metric
-      )
-    `).all();
-
-    // Downloads are cumulative per tag — compute deltas for daily, latest per-tag sums for total
-    let downloadRows;
-    if (isDaily) {
-      // Get the two most recent dates
-      const dates = downloadsDb.prepare(
-        `SELECT DISTINCT date FROM downloads WHERE repo != '' ORDER BY date DESC LIMIT 2`
-      ).all().map(r => r.date);
-      if (dates.length >= 2) {
-        const latestDate = dates[0];
-        const prevDate = dates[1];
-        const latestSums = downloadsDb.prepare(
-          `SELECT repo, SUM(download_count) AS total FROM downloads WHERE date = ? AND repo != '' GROUP BY repo`
-        ).all(latestDate);
-        const prevSums = downloadsDb.prepare(
-          `SELECT repo, SUM(download_count) AS total FROM downloads WHERE date = ? AND repo != '' GROUP BY repo`
-        ).all(prevDate);
-        const prevMap = new Map(prevSums.map(r => [r.repo, r.total]));
-        downloadRows = latestSums.map(r => ({
-          repo: r.repo,
-          downloads: r.total - (prevMap.get(r.repo) || 0),
-        }));
-      } else {
-        downloadRows = [];
-      }
-    } else {
-      // Total: latest download_count per tag, summed per repo
-      downloadRows = downloadsDb.prepare(`
-        WITH latest AS (
-          SELECT repo, tag, download_count,
-            ROW_NUMBER() OVER (PARTITION BY repo, tag ORDER BY date DESC) AS rn
-          FROM downloads WHERE repo != ''
-        )
-        SELECT repo, SUM(download_count) AS downloads
-        FROM latest WHERE rn = 1
-        GROUP BY repo
-      `).all();
-    }
-
-    const repoMap = new Map();
-    const ensure = (repo) => {
-      if (!repoMap.has(repo)) {
-        repoMap.set(repo, { repo, downloads: 0, stars: 0, forks: 0, clones: 0, uniqueClones: 0, views: 0, uniqueViews: 0 });
-      }
-      return repoMap.get(repo);
-    };
-
-    for (const row of trafficRows) {
-      const r = ensure(row.repo);
-      r.clones = row.clones;
-      r.uniqueClones = row.uniqueClones;
-      r.views = row.views;
-      r.uniqueViews = row.uniqueViews;
-    }
-    for (const row of latestRows) {
-      const r = ensure(row.repo);
-      r[row.metric] = row.count;
-    }
-    for (const row of downloadRows) {
-      const r = ensure(row.repo);
-      r.downloads = row.downloads;
-    }
-
-    const result = [...repoMap.values()].sort((a, b) => b.clones - a.clones);
-    return c.json(result);
-  } catch (err) {
-    logger.error('Failed to fetch metrics overview', { error: err.message });
-    return c.json({ error: 'Failed to fetch metrics overview' }, 500);
-  }
-});
-
-/**
- * POST /api/metrics/snapshot — Manually trigger metric snapshot.
- * Optional body: {metric, repo}. If omitted, fetches all metrics for all repos.
- */
-app.post('/api/metrics/snapshot', async (c) => {
-  try {
-    let metric;
-    let repo;
-    try {
-      const body = await c.req.json();
-      metric = body?.metric;
-      repo = body?.repo;
-    } catch {
-      // No body or invalid JSON — fetch all
-    }
-
-    if (metric && !VALID_METRICS.includes(metric)) {
-      return c.json({ error: `Invalid metric, must be one of: ${VALID_METRICS.join(', ')}` }, 400);
-    }
-
-    const repos = repo ? [repo] : getRepoListFromDb();
-    const metricsToFetch = metric ? [metric] : VALID_METRICS;
-
-    const fetchMap = {
-      clones: fetchTrafficClones,
-      views: fetchTrafficViews,
-      stars: fetchStarsSnapshot,
-      forks: fetchForksSnapshot,
-    };
-
-    for (const r of repos) {
-      for (const m of metricsToFetch) {
-        try {
-          await fetchMap[m](r);
-        } catch (err) {
-          logger.error('Metric snapshot failed', { repo: r, metric: m, error: err.message });
-        }
-      }
-    }
-
-    return c.json({ message: 'Metric snapshots completed', repos, metrics: metricsToFetch }, 201);
-  } catch (err) {
-    return c.json({ error: 'Failed to fetch metric snapshot: ' + err.message }, 500);
-  }
-});
 
 /**
  * Parse JSON request body with proper error handling
@@ -2107,7 +1098,7 @@ app.post("/api/signin", async (c) => {
     if (needsRehash(auth.password)) {
       try {
         const newHash = await hashPassword(password);
-        await db.executeQuery({ query: 'UPDATE Auths SET password = ? WHERE email = ?', params: [newHash, email] });
+        await db.updateAuth({ email }, { password: newHash });
         logger.debug('Password hash migrated to scrypt');
       } catch (e) {
         logger.warn('Password rehash failed', { error: e.message });
@@ -2510,54 +1501,6 @@ function loadEnvFile(filePath) {
     // File doesn't exist or unreadable — silent
   }
 }
-
-// ==== DOWNLOAD SNAPSHOT ====
-// Run once on startup
-fetchAllSnapshots().catch(() => {});
-fetchAllMetricSnapshots().catch(() => {});
-
-// Hourly check: if today's snapshot is missing for any repo, take one.
-// Handles the case where the server stays running across midnight
-// and Railway cron doesn't trigger a restart.
-setInterval(async () => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const fetchMap = {
-      clones: fetchTrafficClones,
-      views: fetchTrafficViews,
-      stars: fetchStarsSnapshot,
-      forks: fetchForksSnapshot,
-    };
-    for (const repo of getRepoListFromDb()) {
-      const row = downloadsDb.prepare(
-        'SELECT COUNT(*) as count FROM downloads WHERE repo = ? AND date = ?'
-      ).get(repo, today);
-      if (row.count === 0) {
-        logger.info('No snapshot for today, triggering fetch', { repo, date: today });
-        try {
-          await fetchDownloadSnapshot(repo);
-        } catch (err) {
-          logger.error('Hourly snapshot failed for repo', { repo, error: err.message });
-        }
-      }
-
-      for (const metric of VALID_METRICS) {
-        const metricRow = downloadsDb.prepare(
-          'SELECT COUNT(*) as count FROM github_metrics WHERE repo = ? AND date = ? AND metric = ?'
-        ).get(repo, today, metric);
-        if (metricRow.count === 0) {
-          try {
-            await fetchMap[metric](repo);
-          } catch (err) {
-            logger.error('Hourly metric snapshot failed', { repo, metric, error: err.message });
-          }
-        }
-      }
-    }
-  } catch (err) {
-    logger.error('Hourly snapshot check failed', { error: err.message });
-  }
-}, 60 * 60 * 1000);
 
 // ==== SERVER STARTUP ====
 const server = serve({
