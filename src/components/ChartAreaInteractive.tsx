@@ -14,13 +14,22 @@ import {
   ToggleGroupItem,
 } from "@stevederico/skateboard-ui/shadcn/ui/toggle-group"
 
+/** A single point plotted on the area chart. */
+interface MetricPoint {
+  date: string;
+  total: number;
+}
+
+/** Supported metric type keys. */
+type MetricType = 'downloads' | 'stars' | 'forks' | 'views' | 'clones'
+
 /** Parse YYYY-MM-DD as local date (avoids UTC midnight → previous-day shift) */
-function parseLocalDate(str) {
+function parseLocalDate(str: string): Date {
   return new Date(str + 'T00:00:00')
 }
 
 /** Format a date string for display */
-function fmtDate(str) {
+function fmtDate(str: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
@@ -28,7 +37,7 @@ function fmtDate(str) {
 }
 
 /** Human-readable labels for each metric type. */
-const METRIC_LABELS = {
+const METRIC_LABELS: Record<MetricType, string> = {
   downloads: 'Downloads',
   stars: 'Stars',
   forks: 'Forks',
@@ -36,16 +45,23 @@ const METRIC_LABELS = {
   clones: 'Clones',
 }
 
+/** Props passed to the custom chart tooltip (recharts callback shape). */
+interface CustomTooltipProps {
+  /** Whether the tooltip is currently active */
+  active?: boolean;
+  /** Recharts payload entries, each carrying the hovered data point */
+  payload?: Array<{ payload: MetricPoint }>;
+  /** Current metric type for the label */
+  metricType?: MetricType;
+}
+
 /**
  * Custom tooltip for the area chart.
  *
- * @param {Object} props - Recharts tooltip callback props
- * @param {boolean} props.active
- * @param {Array} props.payload
- * @param {string} [props.metricType='downloads'] - Current metric type for label
- * @returns {JSX.Element|null}
+ * @param props - Recharts tooltip callback props
+ * @returns Tooltip element, or null when inactive
  */
-function CustomTooltip({ active, payload, metricType = 'downloads' }) {
+function CustomTooltip({ active, payload, metricType = 'downloads' }: CustomTooltipProps) {
   if (!active || !payload?.length) return null
   const { date, total } = payload[0].payload
   const label = (METRIC_LABELS[metricType] || 'Downloads').toLowerCase()
@@ -59,6 +75,19 @@ function CustomTooltip({ active, payload, metricType = 'downloads' }) {
   )
 }
 
+/** Props for the ChartAreaInteractive component. */
+interface ChartAreaInteractiveProps {
+  /** Cumulative metric snapshots */
+  data?: MetricPoint[];
+  /** Daily metric deltas */
+  dailyData?: MetricPoint[];
+  /** Active metric type key */
+  metricType?: MetricType;
+}
+
+/** Chart display mode: cumulative total or daily deltas. */
+type ChartMode = 'growth' | 'total'
+
 /**
  * Interactive area chart — Total (cumulative) or Daily (new per day).
  *
@@ -66,14 +95,10 @@ function CustomTooltip({ active, payload, metricType = 'downloads' }) {
  * with a toggle between cumulative and daily views.
  *
  * @component
- * @param {Object} props
- * @param {Array<{date: string, total: number}>} props.data - Cumulative metric snapshots
- * @param {Array<{date: string, total: number}>} props.dailyData - Daily metric deltas
- * @param {string} [props.metricType='downloads'] - Active metric type key
- * @returns {JSX.Element}
+ * @returns Interactive area chart
  */
-export function ChartAreaInteractive({ data = [], dailyData = [], metricType = 'downloads' }) {
-  const [mode, setMode] = React.useState("growth")
+export function ChartAreaInteractive({ data = [], dailyData = [], metricType = 'downloads' }: ChartAreaInteractiveProps) {
+  const [mode, setMode] = React.useState<ChartMode>("growth")
   const activeData = mode === "growth" ? dailyData : data
   const label = METRIC_LABELS[metricType] || 'Downloads'
 
@@ -87,8 +112,8 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
         <CardAction>
           <ToggleGroup
             value={[mode]}
-            onValueChange={(values) => {
-              if (values.length > 0) setMode(values[0])
+            onValueChange={(values: string[]) => {
+              if (values.length > 0) setMode(values[0] as ChartMode)
             }}
             variant="outline"
             className="*:data-[slot=toggle-group-item]:!px-4"
@@ -132,7 +157,7 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
                   allowDataOverflow={false}
                   className="fill-muted-foreground text-xs"
                 />
-                <Tooltip content={(props) => <CustomTooltip {...props} metricType={metricType} />} cursor={false} />
+                <Tooltip content={(props: any) => <CustomTooltip {...props} metricType={metricType} />} cursor={false} />
                 <Area
                   dataKey="total"
                   type="monotone"

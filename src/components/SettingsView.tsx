@@ -5,7 +5,7 @@
  * "Fetch Data" card for manually refreshing GitHub metrics.
  *
  * @component
- * @returns {JSX.Element} Settings view
+ * @returns Settings view
  */
 import { useState, useCallback } from 'react';
 import { useTheme } from 'next-themes';
@@ -35,7 +35,8 @@ export default function SettingsView() {
       toast.success('Data refreshed from GitHub');
     } catch (err) {
       console.error('Failed to fetch data:', err);
-      toast.error(err.message || 'Failed to fetch data from GitHub');
+      const message = err instanceof Error ? err.message : 'Failed to fetch data from GitHub';
+      toast.error(message);
     } finally {
       setIsFetching(false);
     }

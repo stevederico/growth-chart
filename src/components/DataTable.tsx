@@ -14,23 +14,28 @@ import {
   TableRow,
 } from "@stevederico/skateboard-ui/shadcn/ui/table"
 
+/** A single day's metric total. */
+interface MetricPoint {
+  date: string;
+  total: number;
+}
+
+/** Supported metric type keys. */
+type MetricType = 'downloads' | 'stars' | 'forks' | 'views' | 'clones'
+
 /**
  * Format a number with locale-aware grouping.
- *
- * @param {number} num
- * @returns {string}
  */
-function fmt(num) {
+function fmt(num: number): string {
   return new Intl.NumberFormat().format(num ?? 0)
 }
 
 /**
  * Format an ISO date string to a readable display (e.g. "Mar 29, 2026").
  *
- * @param {string} dateStr - ISO date string
- * @returns {string}
+ * @param dateStr - ISO date string
  */
-function fmtDate(dateStr) {
+function fmtDate(dateStr: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
@@ -39,12 +44,20 @@ function fmtDate(dateStr) {
 }
 
 /** Human-readable labels for each metric type. */
-const METRIC_LABELS = {
+const METRIC_LABELS: Record<MetricType, string> = {
   downloads: 'Downloads',
   stars: 'Stars',
   forks: 'Forks',
   views: 'Page Views',
   clones: 'Clones',
+}
+
+/** Props for the DailyTable component. */
+interface DailyTableProps {
+  /** Daily delta data */
+  data?: MetricPoint[];
+  /** Active metric type key */
+  metricType?: MetricType;
 }
 
 /**
@@ -54,12 +67,9 @@ const METRIC_LABELS = {
  * Supports multiple metric types via the metricType prop.
  *
  * @component
- * @param {Object} props
- * @param {Array<{date: string, total: number}>} props.data - Daily delta data
- * @param {string} [props.metricType='downloads'] - Active metric type key
- * @returns {JSX.Element}
+ * @returns Daily metric totals table
  */
-export function DailyTable({ data = [], metricType = 'downloads' }) {
+export function DailyTable({ data = [], metricType = 'downloads' }: DailyTableProps) {
   const metricLabel = METRIC_LABELS[metricType] || 'Downloads'
   const sorted = [...data].sort((a, b) => b.date.localeCompare(a.date))
 
