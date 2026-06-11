@@ -10,23 +10,22 @@ import {
   CardTitle,
 } from "@stevederico/skateboard-ui/shadcn/ui/card"
 
+/** Supported metric type keys. */
+type MetricType = 'downloads' | 'stars' | 'forks' | 'views' | 'clones'
+
 /**
  * Format a number with locale-aware grouping.
- *
- * @param {number} num
- * @returns {string}
  */
-function fmt(num) {
+function fmt(num: number): string {
   return new Intl.NumberFormat().format(num ?? 0)
 }
 
 /**
  * Format a YYYY-MM-DD date string for display (e.g. "Apr 6").
  *
- * @param {string} dateStr - YYYY-MM-DD date string
- * @returns {string}
+ * @param dateStr - YYYY-MM-DD date string
  */
-function fmtDate(dateStr) {
+function fmtDate(dateStr: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
@@ -34,7 +33,7 @@ function fmtDate(dateStr) {
 }
 
 /** Human-readable labels for each metric type. */
-const METRIC_LABELS = {
+const METRIC_LABELS: Record<MetricType, string> = {
   downloads: 'Downloads',
   stars: 'Stars',
   forks: 'Forks',
@@ -42,19 +41,27 @@ const METRIC_LABELS = {
   clones: 'Clones',
 }
 
+/** Props for the SectionCards component. */
+interface SectionCardsProps {
+  /** Week-over-week growth percentage (null if insufficient data) */
+  wowGrowth?: number | null;
+  /** Count in the latest daily delta */
+  valueToday?: number;
+  /** Count needed to hit 20% WoW target */
+  goalNeeded?: number | null;
+  /** YYYY-MM-DD deadline to hit 20% WoW target */
+  goalDeadline?: string | null;
+  /** Active metric type key */
+  metricType?: MetricType;
+}
+
 /**
  * Three metric cards: WoW growth, 20% goal tracker, and value today.
  *
  * @component
- * @param {Object} props
- * @param {number|null} props.wowGrowth - Week-over-week growth percentage (null if insufficient data)
- * @param {number} props.valueToday - Count in the latest daily delta
- * @param {number|null} props.goalNeeded - Count needed to hit 20% WoW target
- * @param {string|null} props.goalDeadline - YYYY-MM-DD deadline to hit 20% WoW target
- * @param {string} [props.metricType='downloads'] - Active metric type key
- * @returns {JSX.Element}
+ * @returns Three metric cards
  */
-export function SectionCards({ wowGrowth = null, valueToday = 0, goalNeeded = null, goalDeadline = null, metricType = 'downloads' }) {
+export function SectionCards({ wowGrowth = null, valueToday = 0, goalNeeded = null, goalDeadline = null, metricType = 'downloads' }: SectionCardsProps) {
   const metricLabel = METRIC_LABELS[metricType] || 'Downloads'
   const hasGrowth = wowGrowth !== null
   const isGrowthUp = hasGrowth && wowGrowth > 0
@@ -92,22 +99,22 @@ export function SectionCards({ wowGrowth = null, valueToday = 0, goalNeeded = nu
         <CardHeader>
           <CardDescription>20% Growth Goal</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {hasGoal ? (isGoalHit ? 'Hit!' : `${fmt(goalNeeded)} needed`) : '--'}
+            {hasGoal ? (isGoalHit ? 'Hit!' : `${fmt(goalNeeded!)} needed`) : '--'}
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
               <Target />
-              {hasGoal ? `by ${fmtDate(goalDeadline)}` : 'goal'}
+              {hasGoal ? `by ${fmtDate(goalDeadline!)}` : 'goal'}
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            {isGoalHit ? 'Target reached' : hasGoal ? `${fmt(goalNeeded)} to go` : 'Need more data'}
+            {isGoalHit ? 'Target reached' : hasGoal ? `${fmt(goalNeeded!)} to go` : 'Need more data'}
             {isGoalHit ? <TrendingUp className="size-4" /> : <Target className="size-4" />}
           </div>
           <div className="text-muted-foreground">
-            {hasGoal ? `Deadline: ${fmtDate(goalDeadline)}` : 'Requires 7+ days of data'}
+            {hasGoal ? `Deadline: ${fmtDate(goalDeadline!)}` : 'Requires 7+ days of data'}
           </div>
         </CardFooter>
       </Card>

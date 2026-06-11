@@ -24,9 +24,41 @@ import {
 import { Input } from '@stevederico/skateboard-ui/shadcn/ui/input';
 import { Label } from '@stevederico/skateboard-ui/shadcn/ui/label';
 import { toast } from 'sonner';
-import { SectionCards } from './SectionCards.jsx';
-import { ChartAreaInteractive } from './ChartAreaInteractive.jsx';
-import { DailyTable } from './DataTable.jsx';
+import { SectionCards } from './SectionCards';
+import { ChartAreaInteractive } from './ChartAreaInteractive';
+import { DailyTable } from './DataTable';
+
+/** Supported metric type keys. */
+type MetricType = 'downloads' | 'stars' | 'forks' | 'views' | 'clones';
+
+/** A single point plotted on the chart — one date with a running/total count. */
+interface MetricPoint {
+  date: string;
+  total: number;
+}
+
+/** A raw snapshot row returned by the downloads or metrics endpoints. */
+interface Snapshot {
+  date: string;
+  /** Present on download snapshots */
+  download_count?: number;
+  /** Present on generic metric snapshots */
+  count?: number;
+}
+
+/** A daily delta row (date + total new count for that day). */
+interface DailyDelta {
+  date: string;
+  total: number;
+}
+
+/** Derived dashboard stats for the metric cards. */
+interface DashboardStats {
+  wowGrowth: number | null;
+  valueToday: number;
+  goalNeeded: number | null;
+  goalDeadline: string | null;
+}
 
 /** Available metric types for the selector dropdown. */
 const METRIC_TYPES = {
@@ -35,7 +67,7 @@ const METRIC_TYPES = {
   forks: { label: 'Forks', icon: GitFork },
   views: { label: 'Page Views', icon: Eye },
   clones: { label: 'Clones', icon: Copy },
-};
+} as const;
 
 /**
  * Analytics view for Growth Chart metrics.
@@ -46,24 +78,24 @@ const METRIC_TYPES = {
  * with optional repo filtering.
  *
  * @component
- * @returns {JSX.Element} Analytics view
+ * @returns Analytics view
  */
 export default function HomeView() {
-  const [snapshots, setSnapshots] = useState(null);
-  const [latestSnapshot, setLatestSnapshot] = useState(null);
-  const [dailyData, setDailyData] = useState(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null);
+  const [latestSnapshot, setLatestSnapshot] = useState<Snapshot | null>(null);
+  const [dailyData, setDailyData] = useState<DailyDelta[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [repos, setRepos] = useState([]);
-  const [selectedRepo, setSelectedRepo] = useState(() => localStorage.getItem('gc_repo') || null);
-  const [selectedMetric, setSelectedMetric] = useState(() => localStorage.getItem('gc_metric') || 'downloads');
+  const [error, setError] = useState<string | null>(null);
+  const [repos, setRepos] = useState<string[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(() => localStorage.getItem('gc_repo') || null);
+  const [selectedMetric, setSelectedMetric] = useState<MetricType>(() => (localStorage.getItem('gc_metric') as MetricType) || 'downloads');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newRepo, setNewRepo] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
   const fetchRepos = useCallback(() => {
     apiRequest('/downloads/repos')
-      .then((data) => setRepos((data.repos || []).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))))
+      .then((data) => setRepos(((data.repos as string[]) || []).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))))
       .catch(() => {});
   }, []);
 
@@ -98,7 +130,8 @@ export default function HomeView() {
       setSelectedRepo(trimmed);
     } catch (err) {
       console.error('Failed to add repo:', err);
-      toast.error(err.message || 'Failed to add repository');
+      const message = err instanceof Error ? err.message : 'Failed to add repository';
+      toast.error(message);
     } finally {
       setIsAdding(false);
     }
@@ -149,23 +182,23 @@ export default function HomeView() {
   }, [fetchData]);
 
   /** Build chart data from snapshots — one point per date with total count */
-  const chartData = useMemo(() => {
+  const chartData = useMemo<MetricPoint[]>(() => {
     if (!snapshots?.length) return [];
     if (selectedMetric === 'downloads') {
-      const byDate = new Map();
+      const byDate = new Map<string, number>();
       for (const s of snapshots) {
         const current = byDate.get(s.date) || 0;
-        byDate.set(s.date, current + s.download_count);
+        byDate.set(s.date, current + (s.download_count ?? 0));
       }
       return [...byDate.entries()]
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([date, total]) => ({ date, total }));
     }
     // Metrics: group by date, sum count across repos
-    const byDate = new Map();
+    const byDate = new Map<string, number>();
     for (const s of snapshots) {
       const current = byDate.get(s.date) || 0;
-      byDate.set(s.date, current + s.count);
+      byDate.set(s.date, current + (s.count ?? 0));
     }
     const sorted = [...byDate.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
@@ -184,7 +217,7 @@ export default function HomeView() {
   }, [snapshots, selectedMetric]);
 
   /** Derive stats from the latest snapshot and daily deltas */
-  const stats = useMemo(() => {
+  const stats = useMemo<DashboardStats>(() => {
     if (!latestSnapshot) {
       return { wowGrowth: null, valueToday: 0, goalNeeded: null, goalDeadline: null };
     }
@@ -193,9 +226,9 @@ export default function HomeView() {
     const todayEntry = (dailyData || []).find((d) => d.date === today);
     const downloadsToday = todayEntry?.total || 0;
 
-    let wowGrowth = null;
-    let goalNeeded = null;
-    let goalDeadline = null;
+    let wowGrowth: number | null = null;
+    let goalNeeded: number | null = null;
+    let goalDeadline: string | null = null;
 
     if (chartData.length >= 2) {
       const now = new Date();
@@ -204,8 +237,8 @@ export default function HomeView() {
 
       const currentTotal = chartData[chartData.length - 1].total;
       const prevEntry = chartData.reduce((closest, entry) =>
-        Math.abs(new Date(entry.date + 'T00:00:00') - sevenDaysAgo) <
-        Math.abs(new Date(closest.date + 'T00:00:00') - sevenDaysAgo)
+        Math.abs(+new Date(entry.date + 'T00:00:00') - +sevenDaysAgo) <
+        Math.abs(+new Date(closest.date + 'T00:00:00') - +sevenDaysAgo)
           ? entry : closest
       );
 
@@ -224,7 +257,7 @@ export default function HomeView() {
     return { wowGrowth, valueToday: downloadsToday, goalNeeded, goalDeadline };
   }, [latestSnapshot, dailyData, chartData]);
 
-  const handleRepoChange = useCallback((value) => {
+  const handleRepoChange = useCallback((value: string | null) => {
     if (value === '__add__') {
       setIsAddDialogOpen(true);
       return;
@@ -285,7 +318,7 @@ export default function HomeView() {
   const SelectedMetricIcon = METRIC_TYPES[selectedMetric]?.icon;
 
   const metricSelector = (
-    <Select value={selectedMetric} onValueChange={setSelectedMetric}>
+    <Select value={selectedMetric} onValueChange={(value) => { if (value) setSelectedMetric(value); }}>
       <SelectTrigger className="w-auto">
         <span className="flex items-center gap-2">
           {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
@@ -304,10 +337,14 @@ export default function HomeView() {
     </Select>
   );
 
+  // Header title is a JSX element (hidden on mobile); skateboard-ui types
+  // title as string, so cast through unknown to pass the element through.
+  const dashboardTitle = <span className="hidden sm:inline">Dashboard</span> as unknown as string;
+
   if (isLoading) {
     return (
       <>
-        <Header title={<span className="hidden sm:inline">Dashboard</span>}>
+        <Header title={dashboardTitle}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -321,7 +358,7 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title={<span className="hidden sm:inline">Dashboard</span>}>
+        <Header title={dashboardTitle}>
           {metricSelector}
           {repoSelector}
         </Header>
@@ -343,7 +380,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title={<span className="hidden sm:inline">Dashboard</span>}>
+      <Header title={dashboardTitle}>
         {metricSelector}
         {repoSelector}
       </Header>

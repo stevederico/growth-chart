@@ -10,18 +10,19 @@ import './assets/styles.css';
 import { lazy, Suspense } from 'react';
 import { Navigate } from 'react-router';
 import { createSkateboardApp } from '@stevederico/skateboard-ui/App';
+import type { AppRoute } from '@stevederico/skateboard-ui/App';
 import { Spinner } from '@stevederico/skateboard-ui/shadcn/ui/spinner';
 import Layout from '@stevederico/skateboard-ui/Layout';
-import CommandMenu from './components/CommandMenu.jsx';
+import CommandMenu from './components/CommandMenu';
 import constants from './constants.json';
-const HomeView = lazy(() => import('./components/HomeView.jsx'));
-const OverviewView = lazy(() => import('./components/OverviewView.jsx'));
-import SettingsView from './components/SettingsView.jsx';
+const HomeView = lazy(() => import('./components/HomeView'));
+const OverviewView = lazy(() => import('./components/OverviewView'));
+import SettingsView from './components/SettingsView';
 
 /**
  * App layout with global command menu overlay.
  *
- * @returns {JSX.Element} Layout with command menu
+ * @returns Layout with command menu
  */
 function AppLayout() {
   return (
@@ -34,10 +35,8 @@ function AppLayout() {
 
 /**
  * Route configuration — single dashboard route.
- *
- * @type {Array<{path: string, element: JSX.Element}>}
  */
-const appRoutes = [
+const appRoutes: AppRoute[] = [
   {
     path: 'home',
     element: (
@@ -68,4 +67,4 @@ createSkateboardApp({
 });
 
 /** Preload HomeView chunk after initial render */
-setTimeout(() => import('./components/HomeView.jsx'), 2000);
+setTimeout(() => import('./components/HomeView'), 2000);

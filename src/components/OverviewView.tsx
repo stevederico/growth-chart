@@ -18,13 +18,37 @@ import {
   ToggleGroup, ToggleGroupItem,
 } from '@stevederico/skateboard-ui/shadcn/ui/toggle-group';
 
+/** A per-repo overview row with all tracked metric totals. */
+interface RepoOverviewRow {
+  repo: string;
+  downloads?: number;
+  stars?: number;
+  forks?: number;
+  clones?: number;
+  uniqueClones?: number;
+  views?: number;
+  uniqueViews?: number;
+}
+
+/** Numeric (sortable) metric columns on an overview row. */
+type NumericKey = Exclude<keyof RepoOverviewRow, 'repo'>;
+
+/** Sortable column key (repo name or any numeric metric). */
+type SortKey = keyof RepoOverviewRow;
+
+/** Sort direction. */
+type SortDir = 'asc' | 'desc';
+
+/** Overview aggregation mode: all-time totals or most recent day. */
+type OverviewMode = 'total' | 'daily';
+
 /** Format a number with locale-aware grouping. */
-function fmt(num) {
+function fmt(num?: number): string {
   return new Intl.NumberFormat().format(num ?? 0);
 }
 
 /** Sortable columns and their data keys. */
-const COLUMNS = [
+const COLUMNS: Array<{ key: SortKey; label: string; align: 'left' | 'right' }> = [
   { key: 'repo', label: 'Repo', align: 'left' },
   { key: 'downloads', label: 'Downloads', align: 'right' },
   { key: 'stars', label: 'Stars', align: 'right' },
@@ -40,18 +64,18 @@ const COLUMNS = [
  * Column headers are clickable to sort ascending/descending.
  *
  * @component
- * @returns {JSX.Element}
+ * @returns Overview table
  */
 export default function OverviewView() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState<RepoOverviewRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [sortKey, setSortKey] = useState('clones');
-  const [sortDir, setSortDir] = useState('desc');
-  const [mode, setMode] = useState('total');
+  const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('clones');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [mode, setMode] = useState<OverviewMode>('total');
   const navigate = useNavigate();
 
-  const fetchData = (period) => {
+  const fetchData = (period?: OverviewMode) => {
     setIsLoading(true);
     setError(null);
     const param = period === 'daily' ? '?period=daily' : '';
@@ -66,7 +90,7 @@ export default function OverviewView() {
 
   useEffect(() => { fetchData(mode); }, [mode]);
 
-  const handleSort = (key) => {
+  const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
     } else {
@@ -78,13 +102,13 @@ export default function OverviewView() {
   const sortedData = useMemo(() => {
     if (!data) return [];
     return [...data].sort((a, b) => {
-      const aVal = a[sortKey];
-      const bVal = b[sortKey];
       if (sortKey === 'repo') {
-        const cmp = (aVal || '').localeCompare(bVal || '', undefined, { sensitivity: 'base' });
+        const cmp = (a.repo || '').localeCompare(b.repo || '', undefined, { sensitivity: 'base' });
         return sortDir === 'asc' ? cmp : -cmp;
       }
-      return sortDir === 'asc' ? (aVal || 0) - (bVal || 0) : (bVal || 0) - (aVal || 0);
+      const aVal = a[sortKey as NumericKey] || 0;
+      const bVal = b[sortKey as NumericKey] || 0;
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
     });
   }, [data, sortKey, sortDir]);
 
@@ -118,7 +142,7 @@ export default function OverviewView() {
               <EmptyTitle>Failed to load data</EmptyTitle>
               <EmptyDescription>{error}</EmptyDescription>
             </EmptyHeader>
-            <Button onClick={fetchData}>Try again</Button>
+            <Button onClick={() => fetchData()}>Try again</Button>
           </Empty>
         </div>
       </>
@@ -142,7 +166,7 @@ export default function OverviewView() {
               </div>
               <ToggleGroup
                 value={[mode]}
-                onValueChange={(values) => { if (values.length > 0) setMode(values[0]); }}
+                onValueChange={(values: string[]) => { if (values.length > 0) setMode(values[0] as OverviewMode); }}
                 variant="outline"
                 className="*:data-[slot=toggle-group-item]:!px-4"
               >
