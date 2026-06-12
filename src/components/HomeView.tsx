@@ -70,6 +70,19 @@ const METRIC_TYPES = {
 } as const;
 
 /**
+ * Type guard narrowing an arbitrary string to a supported {@link MetricType}.
+ *
+ * Validates membership against {@link METRIC_TYPES} keys so untrusted values
+ * (Select callbacks, localStorage) can be narrowed without a cast.
+ *
+ * @param value - Candidate metric key
+ * @returns True when `value` is a valid MetricType
+ */
+function isMetricType(value: string): value is MetricType {
+  return Object.prototype.hasOwnProperty.call(METRIC_TYPES, value);
+}
+
+/**
  * Analytics view for Growth Chart metrics.
  *
  * Composes SectionCards (3 metric cards), ChartAreaInteractive (area chart
@@ -88,7 +101,10 @@ export default function HomeView() {
   const [error, setError] = useState<string | null>(null);
   const [repos, setRepos] = useState<string[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(() => localStorage.getItem('gc_repo') || null);
-  const [selectedMetric, setSelectedMetric] = useState<MetricType>(() => (localStorage.getItem('gc_metric') as MetricType) || 'downloads');
+  const [selectedMetric, setSelectedMetric] = useState<MetricType>(() => {
+    const stored = localStorage.getItem('gc_metric');
+    return stored !== null && isMetricType(stored) ? stored : 'downloads';
+  });
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newRepo, setNewRepo] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -318,7 +334,7 @@ export default function HomeView() {
   const SelectedMetricIcon = METRIC_TYPES[selectedMetric]?.icon;
 
   const metricSelector = (
-    <Select value={selectedMetric} onValueChange={(value) => { if (value) setSelectedMetric(value); }}>
+    <Select value={selectedMetric} onValueChange={(value) => { if (isMetricType(value)) setSelectedMetric(value); }}>
       <SelectTrigger className="w-auto">
         <span className="flex items-center gap-2">
           {SelectedMetricIcon && <SelectedMetricIcon size={14} />}
