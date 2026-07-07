@@ -19,6 +19,7 @@ import { createLogger } from './lib/logger.ts';
 import { isProd, loadEnvFile, loadLocalENV, resolveEnvironmentVariables, validateEnvironmentVariables } from './lib/env.ts';
 import { escapeHtml, validateEmail, validatePassword, validateName } from './lib/validation.ts';
 import { evictOldestEntries } from './lib/store.ts';
+import { createGithubTracking } from './github.ts';
 import {
   TOKEN_EXPIRATION_DAYS,
   hashPassword,
@@ -990,6 +991,20 @@ app.post("/api/payment", async (c) => {
 
 // ==== STATIC ROUTES ====
 app.get("/api/health", (c) => c.json({ status: "ok", timestamp: Date.now() }));
+
+// ==== GITHUB DOWNLOAD & METRICS TRACKING ====
+// Domain layer lives in ./github.ts (kept out of this file so a skateboard
+// boilerplate re-sync can't wipe it). Routes mount unconditionally; the
+// snapshot collectors only run when this process actually binds a port
+// (skipped under SKIP_SERVER_START so tests never hit the network).
+const githubTracking = createGithubTracking({
+  connectionString: config.database.connectionString,
+  logger,
+});
+githubTracking.registerRoutes(app);
+if (shouldStartServer) {
+  githubTracking.startCollectors();
+}
 
 /**
  * Integration test route handler that throws intentionally (test env only).

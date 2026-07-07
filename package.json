@@ -1,7 +1,7 @@
 {
   "name": "growth-chart",
   "private": false,
-  "version": "0.28.1",
+  "version": "0.29.0",
   "skateboardVersion": "4.7.0",
   "type": "module",
   "workspaces": [
