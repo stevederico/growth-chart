@@ -1,5 +1,12 @@
 ## CHANGELOG
 
+0.29.0
+
+  Restore GitHub tracking
+  Fix skateboard drift
+  Add github.ts module
+  Add regression tests
+
 0.28.1
 
   Fix recharts es-toolkit crash
