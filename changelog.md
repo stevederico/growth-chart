@@ -1,5 +1,11 @@
 ## CHANGELOG
 
+0.30.0
+
+  Update skateboard 4.9.2
+  Refresh updater script
+  Add version consistency test
+
 0.29.0
 
   Restore GitHub tracking
