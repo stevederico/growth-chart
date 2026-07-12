@@ -99,22 +99,24 @@ export function SectionCards({ wowGrowth = null, valueToday = 0, goalNeeded = nu
         <CardHeader>
           <CardDescription>20% Growth Goal</CardDescription>
           <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {hasGoal ? (isGoalHit ? 'Hit!' : `${fmt(goalNeeded!)} needed`) : '--'}
+            {goalNeeded !== null && goalDeadline !== null
+              ? (goalNeeded === 0 ? 'Hit!' : `${fmt(goalNeeded)} needed`)
+              : '--'}
           </CardTitle>
           <CardAction>
             <Badge variant="outline">
               <Target />
-              {hasGoal ? `by ${fmtDate(goalDeadline!)}` : 'goal'}
+              {goalDeadline !== null ? `by ${fmtDate(goalDeadline)}` : 'goal'}
             </Badge>
           </CardAction>
         </CardHeader>
         <CardFooter className="flex-col items-start gap-1.5 text-sm">
           <div className="line-clamp-1 flex gap-2 font-medium">
-            {isGoalHit ? 'Target reached' : hasGoal ? `${fmt(goalNeeded!)} to go` : 'Need more data'}
+            {isGoalHit ? 'Target reached' : goalNeeded !== null ? `${fmt(goalNeeded)} to go` : 'Need more data'}
             {isGoalHit ? <TrendingUp className="size-4" /> : <Target className="size-4" />}
           </div>
           <div className="text-muted-foreground">
-            {hasGoal ? `Deadline: ${fmtDate(goalDeadline!)}` : 'Requires 7+ days of data'}
+            {goalDeadline !== null ? `Deadline: ${fmtDate(goalDeadline)}` : 'Requires 7+ days of data'}
           </div>
         </CardFooter>
       </Card>

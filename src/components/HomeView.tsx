@@ -111,7 +111,13 @@ export default function HomeView() {
 
   const fetchRepos = useCallback(() => {
     apiRequest('/downloads/repos')
-      .then((data) => setRepos(((data.repos as string[]) || []).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))))
+      .then((data: unknown) => {
+        const reposVal = typeof data === 'object' && data !== null ? Reflect.get(data, 'repos') : undefined;
+        const list = Array.isArray(reposVal)
+          ? reposVal.filter((r): r is string => typeof r === 'string')
+          : [];
+        setRepos(list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })));
+      })
       .catch(() => {});
   }, []);
 
@@ -353,14 +359,10 @@ export default function HomeView() {
     </Select>
   );
 
-  // Header title is a JSX element (hidden on mobile); skateboard-ui types
-  // title as string, so cast through unknown to pass the element through.
-  const dashboardTitle = <span className="hidden sm:inline">Dashboard</span> as unknown as string;
-
   if (isLoading) {
     return (
       <>
-        <Header title={dashboardTitle}>
+        <Header title="Dashboard" className="max-sm:[&_h1]:hidden">
           {metricSelector}
           {repoSelector}
         </Header>
@@ -374,7 +376,7 @@ export default function HomeView() {
   if (error && !latestSnapshot) {
     return (
       <>
-        <Header title={dashboardTitle}>
+        <Header title="Dashboard" className="max-sm:[&_h1]:hidden">
           {metricSelector}
           {repoSelector}
         </Header>
@@ -396,7 +398,7 @@ export default function HomeView() {
 
   return (
     <>
-      <Header title={dashboardTitle}>
+      <Header title="Dashboard" className="max-sm:[&_h1]:hidden">
         {metricSelector}
         {repoSelector}
       </Header>

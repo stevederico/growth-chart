@@ -113,7 +113,8 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
           <ToggleGroup
             value={[mode]}
             onValueChange={(values: string[]) => {
-              if (values.length > 0) setMode(values[0] as ChartMode)
+              const v = values[0]
+              if (v === 'growth' || v === 'total') setMode(v)
             }}
             variant="outline"
             className="*:data-[slot=toggle-group-item]:!px-4"
@@ -157,7 +158,13 @@ export function ChartAreaInteractive({ data = [], dailyData = [], metricType = '
                   allowDataOverflow={false}
                   className="fill-muted-foreground text-xs"
                 />
-                <Tooltip content={(props: any) => <CustomTooltip {...props} metricType={metricType} />} cursor={false} />
+                <Tooltip content={(props) => (
+                  <CustomTooltip
+                    active={props.active}
+                    payload={props.payload}
+                    metricType={metricType}
+                  />
+                )} cursor={false} />
                 <Area
                   dataKey="total"
                   type="monotone"

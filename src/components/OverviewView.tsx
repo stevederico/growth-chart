@@ -106,8 +106,9 @@ export default function OverviewView() {
         const cmp = (a.repo || '').localeCompare(b.repo || '', undefined, { sensitivity: 'base' });
         return sortDir === 'asc' ? cmp : -cmp;
       }
-      const aVal = a[sortKey as NumericKey] || 0;
-      const bVal = b[sortKey as NumericKey] || 0;
+      const key: NumericKey = sortKey === 'repo' ? 'downloads' : sortKey;
+      const aVal = a[key] || 0;
+      const bVal = b[key] || 0;
       return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
     });
   }, [data, sortKey, sortDir]);
@@ -166,7 +167,10 @@ export default function OverviewView() {
               </div>
               <ToggleGroup
                 value={[mode]}
-                onValueChange={(values: string[]) => { if (values.length > 0) setMode(values[0] as OverviewMode); }}
+                onValueChange={(values: string[]) => {
+                  const v = values[0];
+                  if (v === 'daily' || v === 'total') setMode(v);
+                }}
                 variant="outline"
                 className="*:data-[slot=toggle-group-item]:!px-4"
               >
