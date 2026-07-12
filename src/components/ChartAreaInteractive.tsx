@@ -50,7 +50,7 @@ interface CustomTooltipProps {
   /** Whether the tooltip is currently active */
   active?: boolean;
   /** Recharts payload entries, each carrying the hovered data point */
-  payload?: Array<{ payload: MetricPoint }>;
+  payload?: ReadonlyArray<{ payload?: MetricPoint }>;
   /** Current metric type for the label */
   metricType?: MetricType;
 }
@@ -63,7 +63,9 @@ interface CustomTooltipProps {
  */
 function CustomTooltip({ active, payload, metricType = 'downloads' }: CustomTooltipProps) {
   if (!active || !payload?.length) return null
-  const { date, total } = payload[0].payload
+  const point = payload[0].payload
+  if (!point) return null
+  const { date, total } = point
   const label = (METRIC_LABELS[metricType] || 'Downloads').toLowerCase()
   return (
     <div className="border-border/50 bg-background rounded-lg border px-3 py-2 text-xs shadow-xl">

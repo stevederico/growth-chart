@@ -106,7 +106,7 @@ export default function OverviewView() {
         const cmp = (a.repo || '').localeCompare(b.repo || '', undefined, { sensitivity: 'base' });
         return sortDir === 'asc' ? cmp : -cmp;
       }
-      const key: NumericKey = sortKey === 'repo' ? 'downloads' : sortKey;
+      const key: NumericKey = sortKey;
       const aVal = a[key] || 0;
       const bVal = b[key] || 0;
       return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
